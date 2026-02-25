@@ -1,0 +1,32 @@
+name: Code Quality
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  validate-no-worker-references:
+    name: Verify No Worker Artifact References
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for OCamlWorkerArtifact references
+        run: |
+          if grep -r "OCamlWorkerArtifact" . --include="*.py" 2>/dev/null; then
+            echo "::error::Found OCamlWorkerArtifact references in code"
+            exit 1
+          else
+            echo "Clean - no worker artifact references"
+          fi
+
+      - name: Check for worker_entry_js references
+        run: |
+          if grep -r "worker_entry_js" . --include="*.py" 2>/dev/null; then
+            echo "::error::Found worker_entry_js references in code"
+            exit 1
+          else
+            echo "Clean - no worker entry references"
+          fi

@@ -68,38 +68,20 @@ class OCamlGeneratedSourcesField(StringSequenceField):
 class OCamlLinkFlagsField(StringSequenceField):
     alias = "link_flags"
     default = ()
-    help = "Additional flags passed to ocamlc when linking binaries."
+    help = "Additional flags passed to the linker when linking binaries."
+
+
+class OCamlPlatformField(StringField):
+    alias = "platform"
+    default = "bytecode"
+    valid_choices = ("bytecode", "native", "js_of_ocaml")
+    help = "Compilation platform: bytecode (ocamlc), native (ocamlopt), or js_of_ocaml."
 
 
 class OCamlEntrySourceField(StringField):
     alias = "entry_source"
     required = True
     help = "Path to the OCaml implementation source (e.g. main.ml) used as the binary entrypoint."
-
-
-class OCamlBinaryAddressField(StringField):
-    alias = "binary"
-    required = True
-    help = "Address of an ocaml_binary target used to build this worker artifact."
-
-
-class OCamlWorkerEntryJsField(SingleSourceField):
-    alias = "worker_entry_js"
-    required = True
-    expected_file_extensions = (".js",)
-    help = "Path to the JavaScript worker entry wrapper appended after js_of_ocaml output."
-
-
-class OCamlOutputPathField(StringField):
-    alias = "output_path"
-    default = "worker.js"
-    help = "Path (relative to dist/) for the packaged worker artifact."
-
-
-class OCamlJsOfOcamlFlagsField(StringSequenceField):
-    alias = "js_of_ocaml_flags"
-    default = ()
-    help = "Additional flags passed to js_of_ocaml when producing worker JavaScript."
 
 
 class OCamlModule(Target):
@@ -143,19 +125,8 @@ class OCamlBinary(Target):
         *COMMON_TARGET_FIELDS,
         OCamlDependencyNamesField,
         OCamlEntrySourceField,
+        OCamlPlatformField,
         OCamlPackagesField,
         OCamlLinkFlagsField,
     )
-    help = "An OCaml bytecode executable built from package-level dependencies and an entry source."
-
-
-class OCamlWorkerArtifact(Target):
-    alias = "ocaml_worker_artifact"
-    core_fields = (
-        *COMMON_TARGET_FIELDS,
-        OCamlBinaryAddressField,
-        OCamlWorkerEntryJsField,
-        OCamlOutputPathField,
-        OCamlJsOfOcamlFlagsField,
-    )
-    help = "A packaged Cloudflare Worker artifact created from an ocaml_binary target."
+    help = "An OCaml executable built from package-level dependencies and an entry source with platform support."

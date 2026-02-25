@@ -34,7 +34,8 @@ class BuiltOCamlPackage:
 
 @dataclass(frozen=True)
 class BuiltOCamlBinary:
-    """Linked OCaml bytecode executable output."""
+    """Linked OCaml executable output (bytecode, native, or js_of_ocaml)."""
 
     digest: Digest
-    bytecode_path: str
+    output_path: str
+    platform: str

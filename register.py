@@ -8,7 +8,6 @@ from ocaml.target_types import (
     OCamlLibrary,
     OCamlModule,
     OCamlPackage,
-    OCamlWorkerArtifact,
 )
 
 
@@ -18,7 +17,6 @@ def target_types() -> list[type]:
         OCamlPackage,
         OCamlLibrary,
         OCamlBinary,
-        OCamlWorkerArtifact,
     ]
 
 

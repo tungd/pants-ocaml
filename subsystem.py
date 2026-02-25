@@ -12,5 +12,6 @@ class OCamlToolsSubsystem(Subsystem):
 
     ocamlfind = StrOption(default="ocamlfind", help="Command used to invoke ocamlfind.")
     ocamldep = StrOption(default="ocamldep", help="Command used to invoke ocamldep.")
+    ocamlopt = StrOption(default="ocamlopt", help="Command used to invoke ocamlopt.")
     js_of_ocaml = StrOption(default="js_of_ocaml", help="Command used to invoke js_of_ocaml.")
     bash = StrOption(default="/bin/bash", help="Path to bash used for shell pipeline steps.")

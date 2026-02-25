@@ -1,0 +1,174 @@
+"""Unit tests for OCaml rules helper functions."""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+import pytest
+from pants.build_graph.address import Address
+
+from ocaml.rules import (
+    _dedupe,
+    _join_shell,
+    _module_name_from_stem,
+    _shell_command,
+    _split_command,
+    _target_output_dir,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+
+class TestDedupe:
+    """Tests for _dedupe helper function."""
+
+    def test_empty_list(self) -> None:
+        """Test deduping an empty list."""
+        assert _dedupe([]) == ()
+        assert _dedupe(()) == ()
+
+    def test_no_duplicates(self) -> None:
+        """Test deduping a list without duplicates."""
+        assert _dedupe([1, 2, 3]) == (1, 2, 3)
+
+    def test_with_duplicates(self) -> None:
+        """Test deduping a list with duplicates."""
+        assert _dedupe([1, 2, 2, 3, 1]) == (1, 2, 3)
+        assert _dedupe(["a", "b", "a", "c"]) == ("a", "b", "c")
+
+    def test_preserves_order(self) -> None:
+        """Test that deduping preserves the original order."""
+        assert _dedupe([3, 1, 2, 1, 3]) == (3, 1, 2)
+
+    def test_with_tuples(self) -> None:
+        """Test deduping a tuple."""
+        assert _dedupe((1, 2, 2, 3)) == (1, 2, 3)
+
+
+class TestJoinShell:
+    """Tests for _join_shell helper function."""
+
+    def test_empty_list(self) -> None:
+        """Test joining an empty list."""
+        assert _join_shell([]) == ""
+
+    def test_single_element(self) -> None:
+        """Test joining a single element."""
+        assert _join_shell(["ocamlc"]) == "ocamlc"
+
+    def test_multiple_elements(self) -> None:
+        """Test joining multiple elements."""
+        assert _join_shell(["ocamlc", "-c", "file.ml"]) == "ocamlc -c file.ml"
+
+    def test_filters_empty_strings(self) -> None:
+        """Test that empty strings are filtered out."""
+        assert _join_shell(["ocamlc", "", "-c"]) == "ocamlc -c"
+
+    def test_filters_none(self) -> None:
+        """Test that None values are handled (treated as empty strings)."""
+        assert _join_shell(["ocamlc", None, "-c"]) == "ocamlc -c"
+
+
+class TestSplitCommand:
+    """Tests for _split_command helper function."""
+
+    def test_simple_command(self) -> None:
+        """Test splitting a simple command."""
+        assert _split_command("ocamlc") == ("ocamlc",)
+
+    def test_command_with_args(self) -> None:
+        """Test splitting a command with arguments."""
+        assert _split_command("ocamlc -c file.ml") == ("ocamlc", "-c", "file.ml")
+
+    def test_command_with_quotes(self) -> None:
+        """Test splitting a command with quoted arguments."""
+        assert _split_command('ocamlc -o "output file.byte"') == ("ocamlc", "-o", "output file.byte")
+
+    def test_absolute_path(self) -> None:
+        """Test splitting a command with absolute path."""
+        assert _split_command("/usr/bin/ocamlc") == ("/usr/bin/ocamlc",)
+
+    def test_empty_command_raises_error(self) -> None:
+        """Test that empty command raises ValueError."""
+        with pytest.raises(ValueError, match="Tool command cannot be empty"):
+            _split_command("")
+
+        with pytest.raises(ValueError, match="Tool command cannot be empty"):
+            _split_command("   ")
+
+
+class TestShellCommand:
+    """Tests for _shell_command helper function."""
+
+    def test_simple_command(self) -> None:
+        """Test shell command for simple command."""
+        assert _shell_command("ocamlc") == "ocamlc"
+
+    def test_command_with_args(self) -> None:
+        """Test shell command with arguments."""
+        assert _shell_command("ocamlc -c file.ml") == "ocamlc -c file.ml"
+
+    def test_command_with_spaces_in_args(self) -> None:
+        """Test shell command with spaces in arguments (properly quoted)."""
+        result = _shell_command('ocamlc -o "output file.byte"')
+        assert "ocamlc" in result
+        assert "-o" in result
+        assert "output file.byte" in result
+
+    def test_proper_quoting(self) -> None:
+        """Test that special characters are properly quoted."""
+        result = _shell_command("echo 'hello world'")
+        assert "echo" in result
+        assert "hello world" in result
+
+
+class TestTargetOutputDir:
+    """Tests for _target_output_dir helper function."""
+
+    def test_target_with_spec_path(self) -> None:
+        """Test output dir for target with spec_path."""
+        address = Address("src/hello", target_name="greeter")
+        result = _target_output_dir("binary", address)
+        assert result == "__pants_ocaml__/binary/src/hello/greeter"
+
+    def test_target_at_root(self) -> None:
+        """Test output dir for target at root (no spec_path)."""
+        address = Address("", target_name="root")
+        result = _target_output_dir("binary", address)
+        assert result == "__pants_ocaml__/binary/_root_/root"
+
+    def test_different_kinds(self) -> None:
+        """Test output dir for different artifact kinds."""
+        address = Address("src", target_name="lib")
+
+        assert _target_output_dir("module", address) == "__pants_ocaml__/module/src/lib"
+        assert _target_output_dir("package_private", address) == "__pants_ocaml__/package_private/src/lib"
+        assert _target_output_dir("package_public", address) == "__pants_ocaml__/package_public/src/lib"
+        assert _target_output_dir("binary", address) == "__pants_ocaml__/binary/src/lib"
+
+
+class TestModuleNameFromStem:
+    """Tests for _module_name_from_stem helper function."""
+
+    def test_lowercase_stem(self) -> None:
+        """Test module name from lowercase stem."""
+        assert _module_name_from_stem("greeter") == "Greeter"
+
+    def test_uppercase_stem(self) -> None:
+        """Test module name from uppercase stem."""
+        assert _module_name_from_stem("Greeter") == "Greeter"
+
+    def test_camel_case_stem(self) -> None:
+        """Test module name from camelCase stem."""
+        assert _module_name_from_stem("myGreeter") == "MyGreeter"
+
+    def test_empty_stem(self) -> None:
+        """Test module name from empty stem."""
+        assert _module_name_from_stem("") == ""
+
+    def test_single_character(self) -> None:
+        """Test module name from single character."""
+        assert _module_name_from_stem("x") == "X"

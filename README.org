@@ -3,14 +3,17 @@
 
 * Overview
 
-This is a custom [[https://www.pantsbuild.org][Pants]] backend for OCaml that adds OCaml language support to the Pants build system. It compiles OCaml sources to bytecode executables and can package them as Cloudflare Workers via ~js_of_ocaml~.
+This is a custom [[https://www.pantsbuild.org][Pants]] backend for OCaml that adds OCaml language support to the Pants build system. It compiles OCaml sources to executables with support for multiple compilation platforms.
 
 * Features
 
-- Compile OCaml modules (~.ml~/.mli~) to bytecode (~.cmo~/.cmi~)
+- Compile OCaml modules (~.ml~/.mli~) to object files (~.cmo~/.cmi~ for bytecode, ~.cmx~/.cmi~ for native)
 - Package-level compilation with automatic dependency ordering via ~ocamldep~
-- Link bytecode executables with ocamlfind package support
-- Package OCaml binaries as Cloudflare Workers using ~js_of_ocaml~
+- Link executables with ocamlfind package support
+- Multi-platform compilation support:
+  - ~bytecode~: Uses ~ocamlc~, produces ~.byte~ files (default, most compatible)
+  - ~native~: Uses ~ocamlopt~, produces native executables (best performance)
+  - ~js_of_ocaml~: Uses ~ocamlc~ + ~js_of_ocaml~, produces ~.js~ files for web/Node.js
 - Support for generated sources via Pants ~adhoc_tool~ targets
 - Fine-grained caching and parallel execution via the Pants engine
 
@@ -85,27 +88,21 @@ Fields:
 - ~dependencies~: Package names (resolve to ~//{name}:{name}~ internally or external ocamlfind packages)
 - ~exposed~: Public module names (empty = all modules exposed)
 - ~generated_sources~: Addresses of ~adhoc_tool~ targets that generate ~.ml~/~.mli~ files
-- ~compiler_flags~: Extra flags for ~ocamlc~
+- ~compiler_flags~: Extra flags for the compiler
 
 ** ~ocaml_binary~
 
-Links a bytecode executable from package dependencies.
+Links an executable from package dependencies with platform support.
 
 Fields:
 - ~dependencies~: Package names for compilation closure
 - ~entry_source~: Path to the ~.ml~ file used as entrypoint
+- ~platform~: Compilation target platform (default: ~bytecode~)
+  - ~bytecode~: Produce bytecode executable (~.byte~)
+  - ~native~: Produce native executable
+  - ~js_of_ocaml~: Produce JavaScript file (~.js~)
 - ~packages~: External ocamlfind packages
-- ~link_flags~: Extra flags for ~ocamlc~ linking
-
-** ~ocaml_worker_artifact~
-
-Packages an ~ocaml_binary~ as a Cloudflare Worker via ~js_of_ocaml~.
-
-Fields:
-- ~binary~: Address of the ~ocaml_binary~ target
-- ~worker_entry_js~: Path to JavaScript worker wrapper
-- ~output_path~: Output path (default: ~worker.js~)
-- ~js_of_ocaml_flags~: Extra flags for ~js_of_ocaml~
+- ~link_flags~: Extra flags for the linker
 
 * Configuration
 
@@ -115,6 +112,7 @@ Configure OCaml tool paths via ~pants.toml~:
 [ocaml-tools]
 ocamlfind = "ocamlfind"
 ocamldep = "ocamldep"
+ocamlopt = "ocamlopt"
 js_of_ocaml = "js_of_ocaml"
 bash = "/bin/bash"
 #+end_src
@@ -144,51 +142,60 @@ ocaml_package(
 )
 #+end_src
 
-** Cloudflare Worker
+** Multi-Platform Binaries
 
 #+begin_src ocaml
-(* worker/handler.ml *)
+(* src/handler.ml *)
 let handle_request () =
   print_endline "Processing request..."
 #+end_src
 
-#+begin_src js
-// worker/worker_entry.js
-// Cloudflare Worker entry wrapper
-export default {
-  async fetch(request, env, ctx) {
-    // Call the OCaml-compiled handler
-    return new Response("OK");
-  }
-};
-#+end_src
-
 #+begin_src python
-# worker/BUILD
+# src/BUILD
 ocaml_package(
     name="handler_pkg",
     sources=["*.ml"],
 )
 
+# Bytecode executable (default)
 ocaml_binary(
-    name="handler_bin",
+    name="handler_bytecode",
     dependencies=["handler_pkg"],
     entry_source="handler.ml",
+    platform="bytecode",
 )
 
-ocaml_worker_artifact(
-    name="worker",
-    binary="handler_bin",
-    worker_entry_js="worker_entry.js",
-    output_path="worker.js",
+# Native executable (faster)
+ocaml_binary(
+    name="handler_native",
+    dependencies=["handler_pkg"],
+    entry_source="handler.ml",
+    platform="native",
+)
+
+# JavaScript for web/Node.js
+ocaml_binary(
+    name="handler_js",
+    dependencies=["handler_pkg"],
+    entry_source="handler.ml",
+    platform="js_of_ocaml",
 )
 #+end_src
 
-Build the worker:
+Build the binaries:
 
 #+begin_src bash
-./pants package worker:worker
-# Output: dist/worker.js
+# Build bytecode (default platform can be omitted)
+./pants package src:handler_bytecode
+# Output: dist/handler_bytecode.byte
+
+# Build native
+./pants package src:handler_native
+# Output: dist/handler_native
+
+# Build JavaScript
+./pants package src:handler_js
+# Output: dist/handler_js.js
 #+end_src
 
 ** Generated Sources
@@ -222,9 +229,6 @@ ocaml_package(
 # Build an OCaml binary
 ./pants package //path/to:binary_target
 
-# Build a worker artifact
-./pants package //path/to:worker_target
-
 # List all OCaml packages
 ./pants filter :: --target-type=ocaml_package
 
@@ -238,16 +242,20 @@ The backend uses Pants' engine for fine-grained caching and parallel execution:
 
 1. **Dependency Resolution**: Named dependencies resolve to internal packages (~//{name}:{name}~) or external ocamlfind packages
 2. **Compilation Order**: ~ocamldep -sort~ computes correct module compilation order within packages
-3. **Incremental Builds**: Only recompiles changed modules and their dependents
-4. **Parallel Execution**: Independent packages compile in parallel
+3. **Platform Dispatch**: Binary linking dispatches to the appropriate compiler based on the ~platform~ field:
+   - ~bytecode~: Links with ~ocamlc~ to produce ~.byte~ files
+   - ~native~: Links with ~ocamlopt~ to produce native executables
+   - ~js_of_ocaml~: Links with ~ocamlc~, then converts with ~js_of_ocaml~ to produce ~.js~ files
+4. **Incremental Builds**: Only recompiles changed modules and their dependents
+5. **Parallel Execution**: Independent packages compile in parallel
 
 Compiled artifacts are stored under ~__pants_ocaml__/~ in the working directory.
 
 * Requirements
 
 - Pants 2.x
-- OCaml toolchain: ~ocamlfind~, ~ocamldep~, ~ocamlc~
-- (Optional) ~js_of_ocaml~ for worker artifacts
+- OCaml toolchain: ~ocamlfind~, ~ocamldep~, ~ocamlc~, ~ocamlopt~
+- (Optional) ~js_of_ocaml~ for JavaScript platform
 - (Optional) OPAM for package management
 
 * License

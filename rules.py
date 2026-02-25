@@ -44,23 +44,19 @@ from ocaml.providers import BuiltOCamlBinary, BuiltOCamlPackage, OCamlClosure
 from ocaml.subsystem import OCamlToolsSubsystem
 from ocaml.target_types import (
     OCamlBinary,
-    OCamlBinaryAddressField,
     OCamlCompilerFlagsField,
     OCamlDependencyNamesField,
     OCamlEntrySourceField,
     OCamlExposedModulesField,
     OCamlGeneratedSourcesField,
-    OCamlJsOfOcamlFlagsField,
     OCamlLibrary,
     OCamlLinkFlagsField,
     OCamlModule,
-    OCamlOutputPathField,
     OCamlPackage,
     OCamlPackageSourcesField,
     OCamlPackagesField,
+    OCamlPlatformField,
     OCamlSourcesField,
-    OCamlWorkerArtifact,
-    OCamlWorkerEntryJsField,
 )
 
 
@@ -87,16 +83,6 @@ class BuildOCamlPackageRequest:
 @dataclass(frozen=True)
 class BuildOCamlBinaryRequest:
     address: Address
-
-
-@dataclass(frozen=True)
-class OCamlWorkerArtifactFieldSet(PackageFieldSet):
-    required_fields = (OCamlBinaryAddressField, OCamlWorkerEntryJsField)
-
-    binary: OCamlBinaryAddressField
-    worker_entry_js: OCamlWorkerEntryJsField
-    output_path: OCamlOutputPathField
-    js_of_ocaml_flags: OCamlJsOfOcamlFlagsField
 
 
 @dataclass(frozen=True)
@@ -139,7 +125,7 @@ def _shell_command(command: str) -> str:
 
 def _tool_process_env(ocaml_tools: OCamlToolsSubsystem) -> dict[str, str]:
     tool_dirs: list[str] = []
-    for command in (ocaml_tools.ocamlfind, ocaml_tools.ocamldep, ocaml_tools.js_of_ocaml):
+    for command in (ocaml_tools.ocamlfind, ocaml_tools.ocamldep, ocaml_tools.ocamlopt, ocaml_tools.js_of_ocaml):
         binary = _split_command(command)[0]
         if os.path.isabs(binary):
             tool_dirs.append(str(Path(binary).parent))
@@ -741,7 +727,7 @@ async def build_ocaml_package(
     )
 
 
-@rule(desc="Link OCaml bytecode binary")
+@rule(desc="Link OCaml binary")
 async def build_ocaml_binary(
     request: BuildOCamlBinaryRequest,
     ocaml_tools: OCamlToolsSubsystem,
@@ -816,7 +802,60 @@ async def build_ocaml_binary(
     input_digest = await _merge_or_create_empty(tuple(dep.digest for dep in dep_packages))
 
     output_dir = _target_output_dir("binary", target.address)
-    bytecode_path = f"{output_dir}/{target.address.target_name}.byte"
+    platform = target[OCamlPlatformField].value or "bytecode"
+
+    if platform == "bytecode":
+        return await _link_bytecode_binary(
+            target=target,
+            ocaml_tools=ocaml_tools,
+            all_cmo_files=all_cmo_files,
+            all_include_dirs=all_include_dirs,
+            all_external_names=all_external_names,
+            self_link_flags=self_link_flags,
+            input_digest=input_digest,
+            output_dir=output_dir,
+        )
+    elif platform == "native":
+        return await _link_native_binary(
+            target=target,
+            ocaml_tools=ocaml_tools,
+            all_cmo_files=all_cmo_files,
+            all_include_dirs=all_include_dirs,
+            all_external_names=all_external_names,
+            self_link_flags=self_link_flags,
+            input_digest=input_digest,
+            output_dir=output_dir,
+        )
+    elif platform == "js_of_ocaml":
+        return await _link_js_of_ocaml_binary(
+            target=target,
+            ocaml_tools=ocaml_tools,
+            all_cmo_files=all_cmo_files,
+            all_include_dirs=all_include_dirs,
+            all_external_names=all_external_names,
+            self_link_flags=self_link_flags,
+            input_digest=input_digest,
+            output_dir=output_dir,
+        )
+    else:
+        raise ValueError(
+            f"{target.address} has unknown platform `{platform}`. "
+            f"Valid choices: bytecode, native, js_of_ocaml"
+        )
+
+
+async def _link_bytecode_binary(
+    target: Target,
+    ocaml_tools: OCamlToolsSubsystem,
+    all_cmo_files: tuple[str, ...],
+    all_include_dirs: tuple[str, ...],
+    all_external_names: tuple[str, ...],
+    self_link_flags: tuple[str, ...],
+    input_digest: Digest,
+    output_dir: str,
+) -> BuiltOCamlBinary:
+    """Link a bytecode executable using ocamlc."""
+    output_path = f"{output_dir}/{target.address.target_name}.byte"
 
     package_arg = f"-package {shlex.quote(','.join(all_external_names))}" if all_external_names else ""
     include_args = " ".join(f"-I {shlex.quote(inc)}" for inc in all_include_dirs)
@@ -837,7 +876,7 @@ async def build_ocaml_binary(
                     link_flags,
                     cmo_args,
                     "-o",
-                    shlex.quote(bytecode_path),
+                    shlex.quote(output_path),
                 ]
             ),
         ]
@@ -847,91 +886,50 @@ async def build_ocaml_binary(
         argv=(ocaml_tools.bash, "-c", script),
         env=_tool_process_env(ocaml_tools),
         input_digest=input_digest,
-        output_files=(bytecode_path,),
-        description=f"Link OCaml binary {target.address}",
+        output_files=(output_path,),
+        description=f"Link OCaml bytecode binary {target.address}",
     )
     result = await Get(ProcessResult, Process, process)
 
-    return BuiltOCamlBinary(digest=result.output_digest, bytecode_path=bytecode_path)
+    return BuiltOCamlBinary(digest=result.output_digest, output_path=output_path, platform="bytecode")
 
 
-@rule(desc="Package OCaml worker artifact")
-async def package_ocaml_worker_artifact(
-    field_set: OCamlWorkerArtifactFieldSet,
+async def _link_native_binary(
+    target: Target,
     ocaml_tools: OCamlToolsSubsystem,
-) -> BuiltPackage:
-    target = (
-        await _resolve_wrapped_target(field_set.address, f"the target `{field_set.address}`")
-    ).target
-    if target.alias != OCamlWorkerArtifact.alias:
-        raise ValueError(
-            f"Expected `{OCamlWorkerArtifact.alias}` target for packaging, got `{target.alias}`"
-        )
+    all_cmo_files: tuple[str, ...],
+    all_include_dirs: tuple[str, ...],
+    all_external_names: tuple[str, ...],
+    self_link_flags: tuple[str, ...],
+    input_digest: Digest,
+    output_dir: str,
+) -> BuiltOCamlBinary:
+    """Link a native executable using ocamlopt."""
+    output_path = f"{output_dir}/{target.address.target_name}"
 
-    binary_address = await _resolve_relative_address(
-        field_set.binary.value,
-        owner=field_set.address,
-        field_alias=OCamlBinaryAddressField.alias,
-    )
+    # For native compilation, we need to use .cmx files instead of .cmo
+    # Replace .cmo extension with .cmx for object files
+    cmx_files = tuple(cmo.replace(".cmo", ".cmx") for cmo in all_cmo_files)
 
-    binary_target = (
-        await _resolve_wrapped_target(binary_address, f"the target `{binary_address}`")
-    ).target
-    if binary_target.alias != OCamlBinary.alias:
-        raise ValueError(
-            f"{field_set.address} binary must reference `{OCamlBinary.alias}`, got `{binary_target.alias}`"
-        )
+    package_arg = f"-package {shlex.quote(','.join(all_external_names))}" if all_external_names else ""
+    include_args = " ".join(f"-I {shlex.quote(inc)}" for inc in all_include_dirs)
+    link_flags = " ".join(shlex.quote(flag) for flag in self_link_flags)
+    cmx_args = " ".join(shlex.quote(cmx) for cmx in cmx_files)
 
-    built_binary = await Get(BuiltOCamlBinary, BuildOCamlBinaryRequest(binary_address))
-
-    worker_entry_sources = await hydrate_sources(
-        HydrateSourcesRequest(field_set.worker_entry_js),
-        **implicitly(),
-    )
-    entry_files = tuple(worker_entry_sources.snapshot.files)
-    if len(entry_files) != 1:
-        raise ValueError(
-            f"{field_set.address} must have exactly one worker_entry_js file, found {len(entry_files)}"
-        )
-
-    worker_entry_file = entry_files[0]
-    output_path = field_set.output_path.value or "worker.js"
-    js_of_ocaml_flags = tuple(field_set.js_of_ocaml_flags.value or ())
-
-    input_digest = await _merge_or_create_empty(
-        (built_binary.digest, worker_entry_sources.snapshot.digest)
-    )
-
-    intermediate_js = _target_output_dir("worker", field_set.address) + "/worker-ocaml.js"
-    output_parent = str(Path(output_path).parent)
-
-    js_flags = " ".join(shlex.quote(flag) for flag in js_of_ocaml_flags)
-
-    script_lines = [
-        "set -euo pipefail",
-        f"mkdir -p {shlex.quote(str(Path(intermediate_js).parent))}",
-    ]
-
-    if output_parent and output_parent != ".":
-        script_lines.append(f"mkdir -p {shlex.quote(output_parent)}")
-
-    script_lines.extend(
+    script = "\n".join(
         [
+            "set -euo pipefail",
+            f"mkdir -p {shlex.quote(output_dir)}",
             _join_shell(
                 [
-                    _shell_command(ocaml_tools.js_of_ocaml),
-                    js_flags,
-                    shlex.quote(built_binary.bytecode_path),
+                    _shell_command(ocaml_tools.ocamlfind),
+                    "ocamlopt",
+                    "-linkpkg",
+                    package_arg,
+                    include_args,
+                    link_flags,
+                    cmx_args,
                     "-o",
-                    shlex.quote(intermediate_js),
-                ]
-            ),
-            _join_shell(
-                [
-                    "cat",
-                    shlex.quote(intermediate_js),
-                    shlex.quote(worker_entry_file),
-                    ">",
                     shlex.quote(output_path),
                 ]
             ),
@@ -939,18 +937,91 @@ async def package_ocaml_worker_artifact(
     )
 
     process = Process(
-        argv=(ocaml_tools.bash, "-c", "\n".join(script_lines)),
+        argv=(ocaml_tools.bash, "-c", script),
         env=_tool_process_env(ocaml_tools),
         input_digest=input_digest,
         output_files=(output_path,),
-        description=f"Package OCaml worker artifact {field_set.address}",
+        description=f"Link OCaml native binary {target.address}",
     )
     result = await Get(ProcessResult, Process, process)
 
-    return BuiltPackage(
-        digest=result.output_digest,
-        artifacts=(BuiltPackageArtifact(relpath=output_path),),
+    return BuiltOCamlBinary(digest=result.output_digest, output_path=output_path, platform="native")
+
+
+async def _link_js_of_ocaml_binary(
+    target: Target,
+    ocaml_tools: OCamlToolsSubsystem,
+    all_cmo_files: tuple[str, ...],
+    all_include_dirs: tuple[str, ...],
+    all_external_names: tuple[str, ...],
+    self_link_flags: tuple[str, ...],
+    input_digest: Digest,
+    output_dir: str,
+) -> BuiltOCamlBinary:
+    """Compile to bytecode then convert to JavaScript using js_of_ocaml."""
+    bytecode_path = f"{output_dir}/{target.address.target_name}.byte"
+    js_path = f"{output_dir}/{target.address.target_name}.js"
+
+    # Step 1: Compile to bytecode
+    package_arg = f"-package {shlex.quote(','.join(all_external_names))}" if all_external_names else ""
+    include_args = " ".join(f"-I {shlex.quote(inc)}" for inc in all_include_dirs)
+    link_flags = " ".join(shlex.quote(flag) for flag in self_link_flags)
+    cmo_args = " ".join(shlex.quote(cmo) for cmo in all_cmo_files)
+
+    bytecode_script = "\n".join(
+        [
+            "set -euo pipefail",
+            f"mkdir -p {shlex.quote(output_dir)}",
+            _join_shell(
+                [
+                    _shell_command(ocaml_tools.ocamlfind),
+                    "ocamlc",
+                    "-linkpkg",
+                    package_arg,
+                    include_args,
+                    link_flags,
+                    cmo_args,
+                    "-o",
+                    shlex.quote(bytecode_path),
+                ]
+            ),
+        ]
     )
+
+    bytecode_process = Process(
+        argv=(ocaml_tools.bash, "-c", bytecode_script),
+        env=_tool_process_env(ocaml_tools),
+        input_digest=input_digest,
+        output_files=(bytecode_path,),
+        description=f"Link OCaml bytecode for js_of_ocaml {target.address}",
+    )
+    bytecode_result = await Get(ProcessResult, Process, bytecode_process)
+
+    # Step 2: Convert bytecode to JavaScript
+    js_script = "\n".join(
+        [
+            "set -euo pipefail",
+            _join_shell(
+                [
+                    _shell_command(ocaml_tools.js_of_ocaml),
+                    shlex.quote(bytecode_path),
+                    "-o",
+                    shlex.quote(js_path),
+                ]
+            ),
+        ]
+    )
+
+    js_process = Process(
+        argv=(ocaml_tools.bash, "-c", js_script),
+        env=_tool_process_env(ocaml_tools),
+        input_digest=bytecode_result.output_digest,
+        output_files=(js_path,),
+        description=f"Convert to JavaScript {target.address}",
+    )
+    js_result = await Get(ProcessResult, Process, js_process)
+
+    return BuiltOCamlBinary(digest=js_result.output_digest, output_path=js_path, platform="js_of_ocaml")
 
 
 @rule(desc="Package adhoc tool outputs")
@@ -988,5 +1059,4 @@ def rules() -> list:
     return [
         *collect_rules(),
         UnionRule(PackageFieldSet, AdhocToolArtifactFieldSet),
-        UnionRule(PackageFieldSet, OCamlWorkerArtifactFieldSet),
     ]

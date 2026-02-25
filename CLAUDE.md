@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-This is a **custom Pants backend for OCaml** that adds OCaml language support to the Pants build system. It compiles OCaml sources to bytecode executables and can package them as Cloudflare Workers via `js_of_ocaml`.
+This is a **custom Pants backend for OCaml** that adds OCaml language support to the Pants build system. It compiles OCaml sources to executables with support for multiple compilation platforms.
 
 ## Installation
 
@@ -21,13 +21,12 @@ backend_packages = [
 
 ## Target Types
 
-The backend defines 5 target types organized in a dependency hierarchy:
+The backend defines 4 target types organized in a dependency hierarchy:
 
 1. **`ocaml_module`** - Single OCaml module (`.ml`/`.mli`) compiled to `.cmo`/`.cmi`. Legacy compatibility target.
 2. **`ocaml_library`** - Aggregates `ocaml_module` and `ocaml_library` dependencies. Logical grouping only.
 3. **`ocaml_package`** - Package-level target that recursively scans sources and compiles them using `ocamldep` for correct ordering. **Primary target type for new code.**
-4. **`ocaml_binary`** - Links bytecode executable from package dependencies and an entry source.
-5. **`ocaml_worker_artifact`** - Packages an `ocaml_binary` as a Cloudflare Worker via `js_of_ocaml`.
+4. **`ocaml_binary`** - Links executables from package dependencies and an entry source with platform support.
 
 ### Key Fields
 
@@ -38,12 +37,9 @@ The backend defines 5 target types organized in a dependency hierarchy:
 - `generated_sources` - Addresses of `adhoc_tool` targets that generate `.ml`/`.mli` files
 - `packages` - External ocamlfind package dependencies
 - `compiler_flags` - Extra flags for ocamlc compilation
-- `link_flags` - Extra flags for ocamlc linking
+- `link_flags` - Extra flags for linker
 - `entry_source` - Path to `.ml` file used as binary entrypoint
-- `binary` - Address of `ocaml_binary` for worker artifacts
-- `worker_entry_js` - Path to JavaScript worker wrapper
-- `output_path` - Output path for worker artifact (default: `worker.js`)
-- `js_of_ocaml_flags` - Extra flags for js_of_ocaml
+- `platform` - Compilation platform for binaries: `"bytecode"` (default), `"native"`, or `"js_of_ocaml"`
 
 ## Build Pipeline Architecture
 
@@ -64,7 +60,10 @@ The build rules use Pants' engine with async/await patterns:
    - `transitive_public_include_dirs` - All public include dirs in closure
    - `source_to_cmo` - Mapping of source paths to compiled `.cmo` paths
 
-3. **BuiltOCamlBinary** - Linked bytecode executable with `bytecode_path`
+3. **BuiltOCamlBinary** - Linked executable output with platform support:
+   - `digest` - Digest of compiled output
+   - `output_path` - Path to compiled output (`.byte`, native exe, or `.js`)
+   - `platform` - Platform used: "bytecode", "native", or "js_of_ocaml"
 
 ## Tool Configuration
 
@@ -74,6 +73,7 @@ Configure tool paths via `pants.toml`:
 [ocaml-tools]
 ocamlfind = "ocamlfind"
 ocamldep = "ocamldep"
+ocamlopt = "ocamlopt"
 js_of_ocaml = "js_of_ocaml"
 bash = "/bin/bash"
 ```
@@ -91,9 +91,6 @@ The backend automatically configures `PATH`, `HOME`, and `OPAMROOT` environment 
 
 # Build an OCaml binary
 ./pants package //path/to:binary_target
-
-# Build a worker artifact
-./pants package //path/to:worker_target
 
 # List all OCaml targets
 ./pants filter :: --target-type=ocaml_package
@@ -121,11 +118,26 @@ Compiled artifacts are stored under `__pants_ocaml__/`:
 - `__pants_ocaml__/package_private/{spec_path}/{target_name}/`
 - `__pants_ocaml__/package_public/{spec_path}/{target_name}/`
 - `__pants_ocaml__/binary/{spec_path}/{target_name}/`
-- `__pants_ocaml__/worker/{spec_path}/{target_name}/`
+
+### Platform Support
+
+The `ocaml_binary` target supports three compilation platforms via the `platform` field:
+
+1. **bytecode** (default) - Uses `ocamlc`, outputs `{target_name}.byte`
+   - Most compatible, faster compilation
+   - Requires ocamlfind
+
+2. **native** - Uses `ocamlopt`, outputs `{target_name}` (native executable)
+   - Best performance, slower compilation
+   - Requires ocamlopt
+
+3. **js_of_ocaml** - Uses `ocamlc` + `js_of_ocaml`, outputs `{target_name}.js`
+   - For web/Node.js deployment
+   - Requires js_of_ocaml
 
 ### Entry Source Resolution
 
-Binary `entry_source` field searches for the entry module's `.cmo` file by:
+Binary `entry_source` field searches for the entry module's compiled object file by:
 1. Checking `{spec_path}/{entry_source_raw}`
 2. Checking `{entry_source_raw}` directly
 3. Matching against basename if paths are ambiguous
@@ -151,3 +163,4 @@ ocaml/
 - Shell commands are constructed via `_shell_command()` for proper quoting
 - Use `bash -c` wrapper for multi-step compilation pipelines
 - Deduplication via `_dedupe()` helper for tuple/list collections
+- Platform dispatch in binary linking: `_link_bytecode_binary()`, `_link_native_binary()`, `_link_js_of_ocaml_binary()`
