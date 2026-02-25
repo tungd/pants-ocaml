@@ -6,7 +6,7 @@ readme = "README.org"
 requires-python = ">=3.8"
 license = {text = "Apache-2.0"}
 dependencies = [
-    "pantsbuild>=2.21.0",
+    "pantsbuild.pants>=2.21.0",
 ]
 
 [project.optional-dependencies]
@@ -16,20 +16,16 @@ dev = [
     "pytest-mock>=3.10.0",
 ]
 
-[build-system]
-requires = ["hatchling>=1.5.0"]
-build-backend = "hatchling.build"
-
-[tool.uv]
-dev-dependencies = [
+[dependency-groups]
+dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
     "pytest-mock>=3.10.0",
 ]
 
-# UV configuration
-cache-dir = ".uv-cache"
-
+[build-system]
+requires = ["hatchling>=1.5.0"]
+build-backend = "hatchling.build"
 
 [tool.pytest.ini_options]
 minversion = "7.0"
