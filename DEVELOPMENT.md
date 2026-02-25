@@ -139,7 +139,7 @@ Then update `pyproject.toml` accordingly:
 ```toml
 [project]
 dependencies = [
-    "pantsbuild.pants>=2.21.0",
+    "pantsbuild.pants==2.18.0a0",
     "<package-name>>=<version>",
 ]
 
