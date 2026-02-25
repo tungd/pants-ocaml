@@ -1,0 +1,255 @@
+#+title: Pants OCaml Backend
+#+author: std23
+
+* Overview
+
+This is a custom [[https://www.pantsbuild.org][Pants]] backend for OCaml that adds OCaml language support to the Pants build system. It compiles OCaml sources to bytecode executables and can package them as Cloudflare Workers via ~js_of_ocaml~.
+
+* Features
+
+- Compile OCaml modules (~.ml~/.mli~) to bytecode (~.cmo~/.cmi~)
+- Package-level compilation with automatic dependency ordering via ~ocamldep~
+- Link bytecode executables with ocamlfind package support
+- Package OCaml binaries as Cloudflare Workers using ~js_of_ocaml~
+- Support for generated sources via Pants ~adhoc_tool~ targets
+- Fine-grained caching and parallel execution via the Pants engine
+
+* Installation
+
+Add to your ~pants.toml~:
+
+#+begin_src toml
+[GLOBAL]
+backend_packages = [
+    "pants.core",
+    "pants.backend.adhoc",  # Required for generated_sources support
+    "ocaml",  # This package
+]
+#+end_src
+
+* Quick Start
+
+Create a simple OCaml project:
+
+#+begin_src ocaml
+(* src/greeter.ml *)
+let say_hello name =
+  print_endline ("Hello, " ^ name ^ "!")
+#+end_src
+
+#+begin_src ocaml
+(* src/main.ml *)
+let () =
+  Greeter.say_hello "World"
+#+end_src
+
+Define your BUILD file:
+
+#+begin_src python
+# src/BUILD
+ocaml_package(
+    name="greeter",
+    sources=["*.ml", "*.mli"],
+)
+
+ocaml_binary(
+    name="hello",
+    dependencies=["greeter"],
+    entry_source="main.ml",
+)
+#+end_src
+
+Build and run:
+
+#+begin_src bash
+./pants package src:hello
+./dist/hello.byte
+#+end_src
+
+* Target Types
+
+** ~ocaml_module~ (Legacy)
+
+Single OCaml module compiled to ~.cmo~/.cmi~. Kept for compatibility.
+
+** ~ocaml_library~ (Legacy)
+
+Aggregates module/library dependencies. Logical grouping only.
+
+** ~ocaml_package~ (Recommended)
+
+Package-level target that recursively scans sources and compiles them using ~ocamldep~ for correct dependency ordering.
+
+Fields:
+- ~sources~: Source file globs (default: ~"**/*.ml"~ and ~"**/*.mli"~)
+- ~dependencies~: Package names (resolve to ~//{name}:{name}~ internally or external ocamlfind packages)
+- ~exposed~: Public module names (empty = all modules exposed)
+- ~generated_sources~: Addresses of ~adhoc_tool~ targets that generate ~.ml~/~.mli~ files
+- ~compiler_flags~: Extra flags for ~ocamlc~
+
+** ~ocaml_binary~
+
+Links a bytecode executable from package dependencies.
+
+Fields:
+- ~dependencies~: Package names for compilation closure
+- ~entry_source~: Path to the ~.ml~ file used as entrypoint
+- ~packages~: External ocamlfind packages
+- ~link_flags~: Extra flags for ~ocamlc~ linking
+
+** ~ocaml_worker_artifact~
+
+Packages an ~ocaml_binary~ as a Cloudflare Worker via ~js_of_ocaml~.
+
+Fields:
+- ~binary~: Address of the ~ocaml_binary~ target
+- ~worker_entry_js~: Path to JavaScript worker wrapper
+- ~output_path~: Output path (default: ~worker.js~)
+- ~js_of_ocaml_flags~: Extra flags for ~js_of_ocaml~
+
+* Configuration
+
+Configure OCaml tool paths via ~pants.toml~:
+
+#+begin_src toml
+[ocaml-tools]
+ocamlfind = "ocamlfind"
+ocamldep = "ocamldep"
+js_of_ocaml = "js_of_ocaml"
+bash = "/bin/bash"
+#+end_src
+
+The backend automatically sets up ~PATH~, ~HOME~, and ~OPAMROOT~ for tool processes.
+
+* Examples
+
+** Multi-Package Project
+
+#+begin_src python
+# src/utils/BUILD
+ocaml_package(
+    name="utils",
+    sources=["*.ml"],
+    exposed=["List", "String"],
+)
+#+end_src
+
+#+begin_src python
+# src/core/BUILD
+ocaml_package(
+    name="core",
+    dependencies=["utils"],  # Resolves to //utils:utils internally
+    sources=["*.ml"],
+    packages=["str"],  # External ocamlfind package
+)
+#+end_src
+
+** Cloudflare Worker
+
+#+begin_src ocaml
+(* worker/handler.ml *)
+let handle_request () =
+  print_endline "Processing request..."
+#+end_src
+
+#+begin_src js
+// worker/worker_entry.js
+// Cloudflare Worker entry wrapper
+export default {
+  async fetch(request, env, ctx) {
+    // Call the OCaml-compiled handler
+    return new Response("OK");
+  }
+};
+#+end_src
+
+#+begin_src python
+# worker/BUILD
+ocaml_package(
+    name="handler_pkg",
+    sources=["*.ml"],
+)
+
+ocaml_binary(
+    name="handler_bin",
+    dependencies=["handler_pkg"],
+    entry_source="handler.ml",
+)
+
+ocaml_worker_artifact(
+    name="worker",
+    binary="handler_bin",
+    worker_entry_js="worker_entry.js",
+    output_path="worker.js",
+)
+#+end_src
+
+Build the worker:
+
+#+begin_src bash
+./pants package worker:worker
+# Output: dist/worker.js
+#+end_src
+
+** Generated Sources
+
+Use ~adhoc_tool~ to generate OCaml sources:
+
+#+begin_src python
+# BUILD
+adhoc_tool(
+    name="gen_protocol",
+    executable="/path/to/codegen",
+    output_files=["protocol.ml", "protocol.mli"],
+)
+
+ocaml_package(
+    name="app",
+    sources=["*.ml"],
+    generated_sources=[":gen_protocol"],
+)
+#+end_src
+
+* Common Commands
+
+#+begin_src bash
+# Check OCaml file dependencies
+./pants check ::
+
+# Compile a specific target
+./pants check //path/to:target
+
+# Build an OCaml binary
+./pants package //path/to:binary_target
+
+# Build a worker artifact
+./pants package //path/to:worker_target
+
+# List all OCaml packages
+./pants filter :: --target-type=ocaml_package
+
+# List all OCaml binaries
+./pants filter :: --target-type=ocaml_binary
+#+end_src
+
+* How It Works
+
+The backend uses Pants' engine for fine-grained caching and parallel execution:
+
+1. **Dependency Resolution**: Named dependencies resolve to internal packages (~//{name}:{name}~) or external ocamlfind packages
+2. **Compilation Order**: ~ocamldep -sort~ computes correct module compilation order within packages
+3. **Incremental Builds**: Only recompiles changed modules and their dependents
+4. **Parallel Execution**: Independent packages compile in parallel
+
+Compiled artifacts are stored under ~__pants_ocaml__/~ in the working directory.
+
+* Requirements
+
+- Pants 2.x
+- OCaml toolchain: ~ocamlfind~, ~ocamldep~, ~ocamlc~
+- (Optional) ~js_of_ocaml~ for worker artifacts
+- (Optional) OPAM for package management
+
+* License
+
+SPDX-License-Identifier: MIT OR Apache-2.0
