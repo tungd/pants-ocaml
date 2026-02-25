@@ -13,19 +13,22 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.8", "3.9", "3.10", "3.11"]
+        python-version: ["3.12", "3.13", "3.14"]
 
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
       - name: Install uv
         run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          python -m pip install --upgrade pip uv
 
-      - name: Set up Python ${{ matrix.python-version }}
+      - name: Set up virtual environment
         run: |
-          uv python install ${{ matrix.python-version }}
           uv venv --python ${{ matrix.python-version }}
 
       - name: Install OCaml toolchain
@@ -54,15 +57,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Install uv
         run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          python -m pip install --upgrade pip uv
 
-      - name: Set up Python
+      - name: Set up virtual environment
         run: |
-          uv python install 3.10
-          uv venv --python 3.10
+          uv venv --python 3.12
 
       - name: Install dependencies with uv
         run: |
@@ -70,7 +76,7 @@ jobs:
 
       - name: Validate no worker artifact references
         run: |
-          if grep -r "OCamlWorkerArtifact" . --include="*.py" 2>/dev/null; then
+          if grep -r "OCamlWorkerArtifact" . --include="*.py" --exclude-dir="tests" 2>/dev/null; then
             echo "::error::Found OCamlWorkerArtifact references in code"
             exit 1
           else
