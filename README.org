@@ -258,6 +258,77 @@ Compiled artifacts are stored under ~__pants_ocaml__/~ in the working directory.
 - (Optional) ~js_of_ocaml~ for JavaScript platform
 - (Optional) OPAM for package management
 
+* Development
+
+This project uses [[https://github.com/astral-sh/uv][uv]] as the dependency manager for fast Python package installation and management.
+
+**Installing uv:**
+
+#+begin_src bash
+# macOS/Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Or with Homebrew (macOS)
+brew install uv
+
+# Or with pip
+pip install uv
+#+end_src
+
+**Setting up the development environment:**
+
+#+begin_src bash
+# Install dependencies
+uv pip install -e ".[dev]"
+#+end_src
+
+**Running tests:**
+
+# Run tests
+uv run pytest
+
+# Run tests with coverage
+uv run pytest --cov=ocaml --cov-report=term
+
+# Run specific test file
+uv run pytest tests/unit/test_target_types.py
+
+# Run a specific test
+uv run pytest tests/unit/test_target_types.py::TestOCamlPlatformField::test_valid_choices
+#+end_src
+
+**Backend development workflow:**
+
+#+begin_src bash
+# Verify the backend loads
+uv run python -c "from ocaml import register; print('OK')"
+
+# Check syntax of all Python files
+python3 -m py_compile *.py
+
+# Run type checking (optional)
+uv run mypy ocaml/ --ignore-missing-imports
+#+end_src
+
+**Project structure:**
+
+#+begin_example
+.                        # Project root
+├── ocaml/               # Source files (in project root for Pants backend)
+│   ├── __init__.py
+│   ├── register.py
+│   ├── target_types.py
+│   ├── rules.py
+│   ├── providers.py
+│   └── subsystem.py
+├── tests/               # Test suite
+│   ├── unit/           # Unit tests
+│   └── integration/    # Integration tests
+├── .github/            # CI/CD workflows
+├── pyproject.toml      # Project configuration with uv support
+└── README.org          # This file
+#+end_example
+
 * License
 
-SPDX-License-Identifier: MIT OR Apache-2.0
+SPDX-License-Identifier: Apache-2.0
