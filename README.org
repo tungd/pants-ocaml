@@ -52,13 +52,12 @@ Define your BUILD file:
 # src/BUILD
 ocaml_package(
     name="greeter",
-    sources=["*.ml", "*.mli"],
 )
 
 ocaml_binary(
     name="hello",
     dependencies=["greeter"],
-    entry_source="main.ml",
+    entry="main.ml",
 )
 #+end_src
 
@@ -70,14 +69,6 @@ Build and run:
 #+end_src
 
 * Target Types
-
-** ~ocaml_module~ (Legacy)
-
-Single OCaml module compiled to ~.cmo~/.cmi~. Kept for compatibility.
-
-** ~ocaml_library~ (Legacy)
-
-Aggregates module/library dependencies. Logical grouping only.
 
 ** ~ocaml_package~ (Recommended)
 
@@ -96,7 +87,7 @@ Links an executable from package dependencies with platform support.
 
 Fields:
 - ~dependencies~: Package names for compilation closure
-- ~entry_source~: Path to the ~.ml~ file used as entrypoint
+- ~entry~: Path to the ~.ml~ file used as entrypoint
 - ~platform~: Compilation target platform (default: ~bytecode~)
   - ~bytecode~: Produce bytecode executable (~.byte~)
   - ~native~: Produce native executable
@@ -127,7 +118,6 @@ The backend automatically sets up ~PATH~, ~HOME~, and ~OPAMROOT~ for tool proces
 # src/utils/BUILD
 ocaml_package(
     name="utils",
-    sources=["*.ml"],
     exposed=["List", "String"],
 )
 #+end_src
@@ -137,7 +127,6 @@ ocaml_package(
 ocaml_package(
     name="core",
     dependencies=["utils"],  # Resolves to //utils:utils internally
-    sources=["*.ml"],
     packages=["str"],  # External ocamlfind package
 )
 #+end_src
@@ -154,14 +143,13 @@ let handle_request () =
 # src/BUILD
 ocaml_package(
     name="handler_pkg",
-    sources=["*.ml"],
 )
 
 # Bytecode executable (default)
 ocaml_binary(
     name="handler_bytecode",
     dependencies=["handler_pkg"],
-    entry_source="handler.ml",
+    entry="handler.ml",
     platform="bytecode",
 )
 
@@ -169,7 +157,7 @@ ocaml_binary(
 ocaml_binary(
     name="handler_native",
     dependencies=["handler_pkg"],
-    entry_source="handler.ml",
+    entry="handler.ml",
     platform="native",
 )
 
@@ -177,7 +165,7 @@ ocaml_binary(
 ocaml_binary(
     name="handler_js",
     dependencies=["handler_pkg"],
-    entry_source="handler.ml",
+    entry="handler.ml",
     platform="js_of_ocaml",
 )
 #+end_src
@@ -212,7 +200,6 @@ adhoc_tool(
 
 ocaml_package(
     name="app",
-    sources=["*.ml"],
     generated_sources=[":gen_protocol"],
 )
 #+end_src
@@ -260,54 +247,33 @@ Compiled artifacts are stored under ~__pants_ocaml__/~ in the working directory.
 
 * Development
 
-This project uses [[https://github.com/astral-sh/uv][uv]] as the dependency manager for fast Python package installation and management.
+This repository uses Pants-native plugin testing.
 
-**Installing uv:**
-
-#+begin_src bash
-# macOS/Linux
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Or with Homebrew (macOS)
-brew install uv
-
-# Or with pip
-pip install uv
-#+end_src
-
-**Setting up the development environment:**
+**Plugin testing:**
 
 #+begin_src bash
-# Install dependencies
-uv pip install -e ".[dev]"
+# Run all plugin tests
+pants test tests::
+
+# Run unit tests only
+pants test tests/unit::
+
+# Run integration tests only
+pants test tests/integration::
 #+end_src
 
-**Running tests:**
-
-# Run tests
-uv run pytest
-
-# Run tests with coverage
-uv run pytest --cov=ocaml --cov-report=term
-
-# Run specific test file
-uv run pytest tests/unit/test_target_types.py
-
-# Run a specific test
-uv run pytest tests/unit/test_target_types.py::TestOCamlPlatformField::test_valid_choices
-#+end_src
-
-**Backend development workflow:**
+**Useful local commands:**
 
 #+begin_src bash
-# Verify the backend loads
-uv run python -c "from ocaml import register; print('OK')"
+# Show Pants version
+pants --version
 
-# Check syntax of all Python files
-python3 -m py_compile *.py
+# List targets
+pants list ::
 
-# Run type checking (optional)
-uv run mypy ocaml/ --ignore-missing-imports
+# Run quality checks used in CI
+grep -r "OCamlWorkerArtifact" . --include="*.py" --exclude-dir="tests"
+grep -r "worker_entry_js" . --include="*.py" --exclude-dir="tests"
 #+end_src
 
 **Project structure:**
@@ -325,7 +291,8 @@ uv run mypy ocaml/ --ignore-missing-imports
 │   ├── unit/           # Unit tests
 │   └── integration/    # Integration tests
 ├── .github/            # CI/CD workflows
-├── pyproject.toml      # Project configuration with uv support
+├── pants.toml          # Pants configuration for plugin development/testing
+├── pyproject.toml      # Python package metadata (no Pants PyPI runtime dep)
 └── README.org          # This file
 #+end_example
 

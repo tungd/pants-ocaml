@@ -7,13 +7,9 @@ on:
     branches: [main, develop]
 
 jobs:
-  test:
-    name: Tests (Python ${{ matrix.python-version }})
+  plugin-tests:
+    name: Plugin Tests and Quality
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.12", "3.13", "3.14"]
 
     steps:
       - uses: actions/checkout@v4
@@ -26,98 +22,38 @@ jobs:
       - name: Install js_of_ocaml
         run: |
           opam init -y
-          eval $(opam env)
+          eval "$(opam env)"
           opam install -y js_of_ocaml
 
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Install uv
-        run: |
-          python -m pip install --upgrade pip uv
-
-      - name: Set up virtual environment
-        run: |
-          uv venv --python ${{ matrix.python-version }}
-
-      - name: Install Python dependencies with uv
-        run: |
-          uv pip install -e ".[dev]"
-
-      - name: Verify backend loads
-        run: |
-          uv run python -c "from ocaml import register; print('Backend loads successfully')"
-          uv run python -c "from ocaml.target_types import OCamlPackage, OCamlBinary; print('Target types imported')"
-
-  code-quality:
-    name: Code Quality Checks
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
+      - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Install uv
-        run: |
-          python -m pip install --upgrade pip uv
-
-      - name: Set up virtual environment
-        run: |
-          uv venv --python 3.12
-
-      - name: Install dependencies with uv
-        run: |
-          uv pip install -e .
+      - name: Set up Pants
+        uses: pantsbuild/actions/init-pants@v10
+        with:
+          gha-cache-key: v0
+          named-caches-hash: ${{ hashFiles('**/pants.toml') }}
 
       - name: Validate no worker artifact references
         run: |
           if grep -r "OCamlWorkerArtifact" . --include="*.py" --exclude-dir="tests" 2>/dev/null; then
             echo "::error::Found OCamlWorkerArtifact references in code"
             exit 1
-          else
-            echo "Clean - no worker artifact references"
           fi
+          echo "Clean - no worker artifact references"
 
-      - name: Validate platform field exists
+      - name: Validate no worker entry references
         run: |
-          uv run python -c "from ocaml.target_types import OCamlPlatformField; print('OCamlPlatformField imported successfully')"
+          if grep -r "worker_entry_js" . --include="*.py" --exclude-dir="tests" 2>/dev/null; then
+            echo "::error::Found worker_entry_js references in code"
+            exit 1
+          fi
+          echo "Clean - no worker entry references"
 
-      - name: Validate platform field choices
-        run: |
-          uv run python -c "from ocaml.target_types import OCamlPlatformField; f = OCamlPlatformField(); assert f.valid_choices == ('bytecode', 'native', 'js_of_ocaml'), f'Unexpected choices: {f.valid_choices}'; print('Platform choices validated:', f.valid_choices)"
+      - name: Show Pants version
+        run: pants --version
 
-      - name: Validate provider has output_path (not bytecode_path)
-        run: |
-          uv run python << 'EOF'
-          from ocaml.providers import BuiltOCamlBinary
-          fields = [f.name for f in BuiltOCamlBinary.__dataclass_fields__.values()]
-          assert 'output_path' in fields, "BuiltOCamlBinary should have 'output_path' field"
-          assert 'bytecode_path' not in fields, "BuiltOCamlBinary should not have 'bytecode_path' field (should be 'output_path')"
-          assert 'platform' in fields, "BuiltOCamlBinary should have 'platform' field"
-          print("Provider fields validated:", fields)
-          EOF
-
-      - name: Validate ocamlopt in subsystem
-        run: |
-          uv run python << 'EOF'
-          from ocaml.subsystem import OCamlToolsSubsystem
-          assert hasattr(OCamlToolsSubsystem, 'ocamlopt'), "OCamlToolsSubsystem should have 'ocamlopt' option"
-          assert hasattr(OCamlToolsSubsystem, 'js_of_ocaml'), "OCamlToolsSubsystem should still have 'js_of_ocaml' option"
-          print("Subsystem validated - has ocamlopt and js_of_ocaml")
-          EOF
-
-      - name: Validate target registration
-        run: |
-          uv run python << 'EOF'
-          from ocaml.register import target_types
-          types = target_types()
-          type_aliases = {t.alias for t in types}
-          assert 'ocaml_worker_artifact' not in type_aliases, "OCamlWorkerArtifact should not be in registered target types"
-          assert 'ocaml_binary' in type_aliases, "OCamlBinary should be in registered target types"
-          print("Target types validated:", type_aliases)
-          EOF
+      - name: Run plugin tests
+        run: pants test tests::

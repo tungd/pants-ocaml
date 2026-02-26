@@ -8,16 +8,6 @@ from pants.engine.fs import Digest
 
 
 @dataclass(frozen=True)
-class OCamlClosure:
-    """Transitive compilation closure for OCaml module/library targets."""
-
-    digest: Digest
-    cmo_files: tuple[str, ...]
-    include_dirs: tuple[str, ...]
-    link_packages: tuple[str, ...]
-
-
-@dataclass(frozen=True)
 class BuiltOCamlPackage:
     """Compiled closure for package-level OCaml targets."""
 

@@ -21,37 +21,28 @@ backend_packages = [
 
 ## Target Types
 
-The backend defines 4 target types organized in a dependency hierarchy:
+The backend defines 2 target types:
 
-1. **`ocaml_module`** - Single OCaml module (`.ml`/`.mli`) compiled to `.cmo`/`.cmi`. Legacy compatibility target.
-2. **`ocaml_library`** - Aggregates `ocaml_module` and `ocaml_library` dependencies. Logical grouping only.
-3. **`ocaml_package`** - Package-level target that recursively scans sources and compiles them using `ocamldep` for correct ordering. **Primary target type for new code.**
-4. **`ocaml_binary`** - Links executables from package dependencies and an entry source with platform support.
+1. **`ocaml_package`** - Package-level target that recursively scans sources and compiles them using `ocamldep` for correct ordering.
+2. **`ocaml_binary`** - Links executables from package dependencies and an entry source with platform support.
 
 ### Key Fields
 
 - `sources` - Source files (`.ml`/`.mli`)
-- `dependencies` - For `ocaml_module`/`ocaml_library`: Pants target addresses
 - `dependencies` (named) - For `ocaml_package`/`ocaml_binary`: Package names that resolve to `//{name}:{name}` internally or external ocamlfind packages
 - `exposed` - Module names to publicly expose from a package
 - `generated_sources` - Addresses of `adhoc_tool` targets that generate `.ml`/`.mli` files
 - `packages` - External ocamlfind package dependencies
 - `compiler_flags` - Extra flags for ocamlc compilation
 - `link_flags` - Extra flags for linker
-- `entry_source` - Path to `.ml` file used as binary entrypoint
+- `entry` - Path to `.ml` file used as binary entrypoint
 - `platform` - Compilation platform for binaries: `"bytecode"` (default), `"native"`, or `"js_of_ocaml"`
 
 ## Build Pipeline Architecture
 
 The build rules use Pants' engine with async/await patterns:
 
-1. **OCamlClosure** - Transitive compilation closure containing:
-   - `digest` - Merged digest of all compiled artifacts
-   - `cmo_files` - Compiled `.cmo` files (transitive)
-   - `include_dirs` - Include directories for compilation
-   - `link_packages` - ocamlfind packages for linking
-
-2. **BuiltOCamlPackage** - Package-level compilation result:
+1. **BuiltOCamlPackage** - Package-level compilation result:
    - `internal_dependency_addresses` - Internal package addresses
    - `external_dependency_names` - ocamlfind package names
    - `private_include_dir` - Internal include path
@@ -60,7 +51,7 @@ The build rules use Pants' engine with async/await patterns:
    - `transitive_public_include_dirs` - All public include dirs in closure
    - `source_to_cmo` - Mapping of source paths to compiled `.cmo` paths
 
-3. **BuiltOCamlBinary** - Linked executable output with platform support:
+2. **BuiltOCamlBinary** - Linked executable output with platform support:
    - `digest` - Digest of compiled output
    - `output_path` - Path to compiled output (`.byte`, native exe, or `.js`)
    - `platform` - Platform used: "bytecode", "native", or "js_of_ocaml"
@@ -114,7 +105,6 @@ The backend automatically configures `PATH`, `HOME`, and `OPAMROOT` environment 
 ### Output Directory Structure
 
 Compiled artifacts are stored under `__pants_ocaml__/`:
-- `__pants_ocaml__/module/{spec_path}/{target_name}/`
 - `__pants_ocaml__/package_private/{spec_path}/{target_name}/`
 - `__pants_ocaml__/package_public/{spec_path}/{target_name}/`
 - `__pants_ocaml__/binary/{spec_path}/{target_name}/`
@@ -137,9 +127,9 @@ The `ocaml_binary` target supports three compilation platforms via the `platform
 
 ### Entry Source Resolution
 
-Binary `entry_source` field searches for the entry module's compiled object file by:
-1. Checking `{spec_path}/{entry_source_raw}`
-2. Checking `{entry_source_raw}` directly
+Binary `entry` field searches for the entry module's compiled object file by:
+1. Checking `{spec_path}/{entry_raw}`
+2. Checking `{entry_raw}` directly
 3. Matching against basename if paths are ambiguous
 
 ## File Structure
@@ -158,7 +148,6 @@ ocaml/
 
 - All build rules are async functions returning `Get` results or `await MultiGet`
 - Use `hydrate_sources()` with `HydrateSourcesRequest` for source files
-- Use `resolve_dependencies()` for Pants dependency fields
 - Use custom address resolution for named package dependencies
 - Shell commands are constructed via `_shell_command()` for proper quoting
 - Use `bash -c` wrapper for multi-step compilation pipelines

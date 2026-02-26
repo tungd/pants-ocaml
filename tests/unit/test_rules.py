@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
-from typing import TYPE_CHECKING
-
 import pytest
 from pants.build_graph.address import Address
 
 from ocaml.rules import (
+    _binary_output_basename,
     _dedupe,
     _join_shell,
     _module_name_from_stem,
@@ -17,9 +14,6 @@ from ocaml.rules import (
     _split_command,
     _target_output_dir,
 )
-
-if TYPE_CHECKING:
-    from collections.abc import Iterator
 
 
 class TestDedupe:
@@ -148,6 +142,30 @@ class TestTargetOutputDir:
         assert _target_output_dir("package_private", address) == "__pants_ocaml__/package_private/src/lib"
         assert _target_output_dir("package_public", address) == "__pants_ocaml__/package_public/src/lib"
         assert _target_output_dir("binary", address) == "__pants_ocaml__/binary/src/lib"
+
+    def test_target_name_override(self) -> None:
+        address = Address("src", target_name="ignored")
+        result = _target_output_dir("binary", address, target_name="main")
+        assert result == "__pants_ocaml__/binary/src/main"
+
+    def test_missing_target_name_uses_fallback(self) -> None:
+        address = Address("src")
+        result = _target_output_dir("binary", address)
+        assert result == "__pants_ocaml__/binary/src/_unnamed_"
+
+
+class TestBinaryOutputBasename:
+    def test_uses_target_name_when_present(self) -> None:
+        class FakeTarget:
+            address = Address("src", target_name="hello")
+
+        assert _binary_output_basename(FakeTarget(), "main.ml") == "hello"
+
+    def test_uses_entry_stem_when_name_missing(self) -> None:
+        class FakeTarget:
+            address = Address("src")
+
+        assert _binary_output_basename(FakeTarget(), "main.ml") == "main"
 
 
 class TestModuleNameFromStem:

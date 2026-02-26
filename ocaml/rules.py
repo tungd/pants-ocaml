@@ -26,53 +26,28 @@ from pants.engine.fs import (
     Digest,
     MergeDigests,
 )
-from pants.engine.internals.graph import hydrate_sources, resolve_dependencies, resolve_target
-from pants.engine.internals.selectors import Get, MultiGet, concurrently
+from pants.engine.internals.graph import hydrate_sources, resolve_target
+from pants.engine.internals.selectors import Get, MultiGet
 from pants.engine.process import Process, ProcessResult
 from pants.engine.rules import collect_rules, implicitly, rule
-from pants.engine.target import (
-    Dependencies,
-    DependenciesRequest,
-    HydrateSourcesRequest,
-    Target,
-    WrappedTarget,
-    WrappedTargetRequest,
-)
+from pants.engine.target import HydrateSourcesRequest, Target, WrappedTarget, WrappedTargetRequest
 from pants.engine.unions import UnionRule
 
-from ocaml.providers import BuiltOCamlBinary, BuiltOCamlPackage, OCamlClosure
+from ocaml.providers import BuiltOCamlBinary, BuiltOCamlPackage
 from ocaml.subsystem import OCamlToolsSubsystem
 from ocaml.target_types import (
     OCamlBinary,
     OCamlCompilerFlagsField,
     OCamlDependencyNamesField,
-    OCamlEntrySourceField,
+    OCamlEntryField,
     OCamlExposedModulesField,
     OCamlGeneratedSourcesField,
-    OCamlLibrary,
     OCamlLinkFlagsField,
-    OCamlModule,
     OCamlPackage,
     OCamlPackageSourcesField,
     OCamlPackagesField,
     OCamlPlatformField,
-    OCamlSourcesField,
 )
-
-
-@dataclass(frozen=True)
-class BuildOCamlTargetRequest:
-    address: Address
-
-
-@dataclass(frozen=True)
-class BuildOCamlModuleRequest:
-    address: Address
-
-
-@dataclass(frozen=True)
-class BuildOCamlLibraryRequest:
-    address: Address
 
 
 @dataclass(frozen=True)
@@ -103,9 +78,10 @@ def _dedupe(items: tuple[str, ...] | list[str]) -> tuple[str, ...]:
     return tuple(out)
 
 
-def _target_output_dir(kind: str, address: Address) -> str:
+def _target_output_dir(kind: str, address: Address, target_name: str | None = None) -> str:
     spec_path = address.spec_path if address.spec_path else "_root_"
-    return f"__pants_ocaml__/{kind}/{spec_path}/{address.target_name}"
+    resolved_target_name = target_name or address.target_name or "_unnamed_"
+    return f"__pants_ocaml__/{kind}/{spec_path}/{resolved_target_name}"
 
 
 def _join_shell(parts: list[str]) -> str:
@@ -154,6 +130,12 @@ def _module_name_from_stem(stem: str) -> str:
     return stem[:1].upper() + stem[1:] if stem else stem
 
 
+def _binary_output_basename(target: Target, entry: str) -> str:
+    if target.address.target_name:
+        return target.address.target_name
+    return Path(entry).stem
+
+
 async def _resolve_relative_address(raw_value: str, owner: Address, field_alias: str) -> Address:
     address_input = AddressInput.parse(
         raw_value,
@@ -168,23 +150,6 @@ async def _resolve_wrapped_target(address: Address, description_of_origin: str) 
         WrappedTargetRequest(address, description_of_origin=description_of_origin),
         **implicitly(),
     )
-
-
-async def _resolve_module_or_library_dependencies(target: Target) -> tuple[Target, ...]:
-    dep_addresses = await resolve_dependencies(**implicitly(DependenciesRequest(target[Dependencies])))
-    wrapped_deps = await concurrently(
-        _resolve_wrapped_target(dep_address, "<infallible>") for dep_address in dep_addresses
-    )
-    dep_targets = tuple(wrapped.target for wrapped in wrapped_deps)
-    resolved: list[Target] = []
-    for dep in dep_targets:
-        if dep.alias not in {OCamlModule.alias, OCamlLibrary.alias}:
-            raise ValueError(
-                f"{target.address} has unsupported dependency `{dep.address}` of type `{dep.alias}`. "
-                f"Allowed dependency types: {OCamlModule.alias}, {OCamlLibrary.alias}."
-            )
-        resolved.append(dep)
-    return tuple(resolved)
 
 
 async def _resolve_internal_package_by_name(name: str) -> Target | None:
@@ -291,178 +256,6 @@ def _resolve_exposed_stems(
         )
 
     return _dedupe(resolved)
-
-
-@rule(desc="Build OCaml transitive closure")
-async def build_ocaml_target(request: BuildOCamlTargetRequest) -> OCamlClosure:
-    wrapped = await _resolve_wrapped_target(request.address, f"the target `{request.address}`")
-    target = wrapped.target
-
-    if target.alias == OCamlModule.alias:
-        return await Get(OCamlClosure, BuildOCamlModuleRequest(request.address))
-    if target.alias == OCamlLibrary.alias:
-        return await Get(OCamlClosure, BuildOCamlLibraryRequest(request.address))
-
-    raise ValueError(
-        f"`{request.address}` is `{target.alias}`. Only {OCamlModule.alias} and "
-        f"{OCamlLibrary.alias} can be used in OCaml module/library closures."
-    )
-
-
-@rule(desc="Compile OCaml module (compatibility target)")
-async def build_ocaml_module(
-    request: BuildOCamlModuleRequest,
-    ocaml_tools: OCamlToolsSubsystem,
-) -> OCamlClosure:
-    wrapped = await _resolve_wrapped_target(request.address, f"the target `{request.address}`")
-    target = wrapped.target
-    if target.alias != OCamlModule.alias:
-        raise ValueError(f"Expected `{OCamlModule.alias}` target, got `{target.alias}` at {target.address}")
-
-    dep_targets = await _resolve_module_or_library_dependencies(target)
-    dep_closures = (
-        await MultiGet(
-            Get(OCamlClosure, BuildOCamlTargetRequest(dep.address))
-            for dep in dep_targets
-        )
-        if dep_targets
-        else ()
-    )
-
-    hydrated = await hydrate_sources(
-        HydrateSourcesRequest(target[OCamlSourcesField]),
-        **implicitly(),
-    )
-    source_files = tuple(sorted(hydrated.snapshot.files))
-    ml_files = tuple(f for f in source_files if f.endswith(".ml"))
-    mli_files = tuple(f for f in source_files if f.endswith(".mli"))
-
-    if len(ml_files) != 1:
-        raise ValueError(
-            f"{target.address} must have exactly one `.ml` source in `sources`; found {len(ml_files)}."
-        )
-    if len(mli_files) > 1:
-        raise ValueError(
-            f"{target.address} can have at most one `.mli` source in `sources`; found {len(mli_files)}."
-        )
-
-    ml_file = ml_files[0]
-    mli_file = mli_files[0] if mli_files else None
-    module_basename = Path(ml_file).stem
-
-    dep_include_dirs = _dedupe([inc for closure in dep_closures for inc in closure.include_dirs])
-    dep_cmo_files = _dedupe([cmo for closure in dep_closures for cmo in closure.cmo_files])
-    dep_link_packages = _dedupe([pkg for closure in dep_closures for pkg in closure.link_packages])
-
-    self_packages = tuple(target[OCamlPackagesField].value or ())
-    self_compiler_flags = tuple(target[OCamlCompilerFlagsField].value or ())
-
-    output_dir = _target_output_dir("module", target.address)
-    cmo_path = f"{output_dir}/{module_basename}.cmo"
-    cmi_path = f"{output_dir}/{module_basename}.cmi"
-
-    include_dirs = _dedupe([*dep_include_dirs, output_dir])
-
-    input_digest = await _merge_or_create_empty(
-        (
-            hydrated.snapshot.digest,
-            *tuple(closure.digest for closure in dep_closures),
-        )
-    )
-
-    package_arg = f"-package {shlex.quote(','.join(self_packages))}" if self_packages else ""
-    include_args = " ".join(f"-I {shlex.quote(inc)}" for inc in include_dirs)
-    compiler_flags = " ".join(shlex.quote(flag) for flag in self_compiler_flags)
-
-    compile_prefix = _join_shell(
-        [
-            _shell_command(ocaml_tools.ocamlfind),
-            "ocamlc",
-            package_arg,
-            "-c",
-            include_args,
-            compiler_flags,
-        ]
-    )
-
-    script_lines = [
-        "set -euo pipefail",
-        f"mkdir -p {shlex.quote(output_dir)}",
-    ]
-
-    if mli_file:
-        script_lines.append(
-            _join_shell([
-                compile_prefix,
-                shlex.quote(mli_file),
-                "-o",
-                shlex.quote(cmi_path),
-            ])
-        )
-
-    script_lines.append(
-        _join_shell([
-            compile_prefix,
-            shlex.quote(ml_file),
-            "-o",
-            shlex.quote(cmo_path),
-        ])
-    )
-
-    process = Process(
-        argv=(ocaml_tools.bash, "-c", "\n".join(script_lines)),
-        env=_tool_process_env(ocaml_tools),
-        input_digest=input_digest,
-        output_files=(cmo_path, cmi_path),
-        description=f"Compile OCaml module {target.address}",
-    )
-    process_result = await Get(ProcessResult, Process, process)
-
-    closure_digest = await _merge_or_create_empty(
-        (
-            process_result.output_digest,
-            *tuple(closure.digest for closure in dep_closures),
-        )
-    )
-
-    return OCamlClosure(
-        digest=closure_digest,
-        cmo_files=_dedupe([*dep_cmo_files, cmo_path]),
-        include_dirs=include_dirs,
-        link_packages=_dedupe([*dep_link_packages, *self_packages]),
-    )
-
-
-@rule(desc="Build OCaml library closure (compatibility target)")
-async def build_ocaml_library(request: BuildOCamlLibraryRequest) -> OCamlClosure:
-    wrapped = await _resolve_wrapped_target(request.address, f"the target `{request.address}`")
-    target = wrapped.target
-    if target.alias != OCamlLibrary.alias:
-        raise ValueError(f"Expected `{OCamlLibrary.alias}` target, got `{target.alias}` at {target.address}")
-
-    dep_targets = await _resolve_module_or_library_dependencies(target)
-    dep_closures = (
-        await MultiGet(
-            Get(OCamlClosure, BuildOCamlTargetRequest(dep.address))
-            for dep in dep_targets
-        )
-        if dep_targets
-        else ()
-    )
-
-    closure_digest = await _merge_or_create_empty(tuple(closure.digest for closure in dep_closures))
-
-    self_packages = tuple(target[OCamlPackagesField].value or ())
-    dep_cmo_files = _dedupe([cmo for closure in dep_closures for cmo in closure.cmo_files])
-    dep_include_dirs = _dedupe([inc for closure in dep_closures for inc in closure.include_dirs])
-    dep_link_packages = _dedupe([pkg for closure in dep_closures for pkg in closure.link_packages])
-
-    return OCamlClosure(
-        digest=closure_digest,
-        cmo_files=dep_cmo_files,
-        include_dirs=dep_include_dirs,
-        link_packages=_dedupe([*dep_link_packages, *self_packages]),
-    )
 
 
 @rule(desc="Compile OCaml package")
@@ -761,11 +554,11 @@ async def build_ocaml_binary(
         for src, cmo in dep.source_to_cmo:
             source_to_cmo[src] = cmo
 
-    entry_source_raw = target[OCamlEntrySourceField].value
+    entry_raw = target[OCamlEntryField].value
     candidate_paths = []
     if target.address.spec_path:
-        candidate_paths.append(os.path.join(target.address.spec_path, entry_source_raw))
-    candidate_paths.append(entry_source_raw)
+        candidate_paths.append(os.path.join(target.address.spec_path, entry_raw))
+    candidate_paths.append(entry_raw)
 
     entry_cmo = None
     for candidate in candidate_paths:
@@ -777,21 +570,21 @@ async def build_ocaml_binary(
         basename_matches = [
             cmo
             for src, cmo in source_to_cmo.items()
-            if src.endswith(f"/{entry_source_raw}") or src == entry_source_raw
+            if src.endswith(f"/{entry_raw}") or src == entry_raw
         ]
         basename_matches = list(_dedupe(basename_matches))
         if len(basename_matches) == 1:
             entry_cmo = basename_matches[0]
         elif len(basename_matches) > 1:
             raise ValueError(
-                f"{target.address} entry_source `{entry_source_raw}` is ambiguous across package closure. "
+                f"{target.address} entry `{entry_raw}` is ambiguous across package closure. "
                 "Use a more specific relative path."
             )
 
     if entry_cmo is None:
         known = ", ".join(sorted(source_to_cmo.keys()))
         raise ValueError(
-            f"{target.address} entry_source `{entry_source_raw}` not found in dependency package sources. "
+            f"{target.address} entry `{entry_raw}` not found in dependency package sources. "
             f"Known sources: {known}"
         )
 
@@ -801,7 +594,8 @@ async def build_ocaml_binary(
 
     input_digest = await _merge_or_create_empty(tuple(dep.digest for dep in dep_packages))
 
-    output_dir = _target_output_dir("binary", target.address)
+    output_basename = _binary_output_basename(target, entry_raw)
+    output_dir = _target_output_dir("binary", target.address, output_basename)
     platform = target[OCamlPlatformField].value or "bytecode"
 
     if platform == "bytecode":
@@ -814,6 +608,7 @@ async def build_ocaml_binary(
             self_link_flags=self_link_flags,
             input_digest=input_digest,
             output_dir=output_dir,
+            output_basename=output_basename,
         )
     elif platform == "native":
         return await _link_native_binary(
@@ -825,6 +620,7 @@ async def build_ocaml_binary(
             self_link_flags=self_link_flags,
             input_digest=input_digest,
             output_dir=output_dir,
+            output_basename=output_basename,
         )
     elif platform == "js_of_ocaml":
         return await _link_js_of_ocaml_binary(
@@ -836,6 +632,7 @@ async def build_ocaml_binary(
             self_link_flags=self_link_flags,
             input_digest=input_digest,
             output_dir=output_dir,
+            output_basename=output_basename,
         )
     else:
         raise ValueError(
@@ -853,9 +650,10 @@ async def _link_bytecode_binary(
     self_link_flags: tuple[str, ...],
     input_digest: Digest,
     output_dir: str,
+    output_basename: str,
 ) -> BuiltOCamlBinary:
     """Link a bytecode executable using ocamlc."""
-    output_path = f"{output_dir}/{target.address.target_name}.byte"
+    output_path = f"{output_dir}/{output_basename}.byte"
 
     package_arg = f"-package {shlex.quote(','.join(all_external_names))}" if all_external_names else ""
     include_args = " ".join(f"-I {shlex.quote(inc)}" for inc in all_include_dirs)
@@ -903,9 +701,10 @@ async def _link_native_binary(
     self_link_flags: tuple[str, ...],
     input_digest: Digest,
     output_dir: str,
+    output_basename: str,
 ) -> BuiltOCamlBinary:
     """Link a native executable using ocamlopt."""
-    output_path = f"{output_dir}/{target.address.target_name}"
+    output_path = f"{output_dir}/{output_basename}"
 
     # For native compilation, we need to use .cmx files instead of .cmo
     # Replace .cmo extension with .cmx for object files
@@ -957,10 +756,11 @@ async def _link_js_of_ocaml_binary(
     self_link_flags: tuple[str, ...],
     input_digest: Digest,
     output_dir: str,
+    output_basename: str,
 ) -> BuiltOCamlBinary:
     """Compile to bytecode then convert to JavaScript using js_of_ocaml."""
-    bytecode_path = f"{output_dir}/{target.address.target_name}.byte"
-    js_path = f"{output_dir}/{target.address.target_name}.js"
+    bytecode_path = f"{output_dir}/{output_basename}.byte"
+    js_path = f"{output_dir}/{output_basename}.js"
 
     # Step 1: Compile to bytecode
     package_arg = f"-package {shlex.quote(','.join(all_external_names))}" if all_external_names else ""

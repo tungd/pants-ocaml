@@ -52,3 +52,4 @@ htmlcov/
 # Pants
 __pants_cache__/
 __pants_ocaml__/
+.pants.d/

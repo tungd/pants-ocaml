@@ -12,8 +12,6 @@ from pants.testutil.rule_runner import RuleRunner
 from ocaml.subsystem import OCamlToolsSubsystem
 from ocaml.target_types import (
     OCamlBinary,
-    OCamlLibrary,
-    OCamlModule,
     OCamlPackage,
 )
 
@@ -71,13 +69,12 @@ def simple_build_file(temp_project_dir: Path) -> Path:
         """
 ocaml_package(
     name="greeter",
-    sources=["*.ml"],
 )
 
 ocaml_binary(
     name="hello",
     dependencies=["greeter"],
-    entry_source="main.ml",
+    entry="main.ml",
 )
 """
     )
@@ -88,9 +85,7 @@ def create_ocaml_rule_runner(*extra_target_types: type, extra_options: dict | No
     """Create a RuleRunner instance configured for OCaml backend testing."""
     return RuleRunner(
         target_types=[
-            OCamlModule,
             OCamlPackage,
-            OCamlLibrary,
             OCamlBinary,
             AdhocToolTarget,
             *extra_target_types,

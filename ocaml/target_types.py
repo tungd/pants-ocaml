@@ -4,19 +4,11 @@ from __future__ import annotations
 
 from pants.engine.target import (
     COMMON_TARGET_FIELDS,
-    Dependencies,
     MultipleSourcesField,
-    SingleSourceField,
     StringField,
     StringSequenceField,
     Target,
 )
-
-
-class OCamlSourcesField(MultipleSourcesField):
-    alias = "sources"
-    expected_file_extensions = (".ml", ".mli")
-    help = "OCaml source files for this module (.ml and optionally .mli)."
 
 
 class OCamlPackageSourcesField(MultipleSourcesField):
@@ -78,22 +70,10 @@ class OCamlPlatformField(StringField):
     help = "Compilation platform: bytecode (ocamlc), native (ocamlopt), or js_of_ocaml."
 
 
-class OCamlEntrySourceField(StringField):
-    alias = "entry_source"
+class OCamlEntryField(StringField):
+    alias = "entry"
     required = True
     help = "Path to the OCaml implementation source (e.g. main.ml) used as the binary entrypoint."
-
-
-class OCamlModule(Target):
-    alias = "ocaml_module"
-    core_fields = (
-        *COMMON_TARGET_FIELDS,
-        OCamlSourcesField,
-        Dependencies,
-        OCamlPackagesField,
-        OCamlCompilerFlagsField,
-    )
-    help = "A single OCaml module compiled to .cmo/.cmi outputs. Kept for compatibility."
 
 
 class OCamlPackage(Target):
@@ -109,22 +89,12 @@ class OCamlPackage(Target):
     help = "A package-level OCaml target that recursively scans sources and compiles via ocamldep order."
 
 
-class OCamlLibrary(Target):
-    alias = "ocaml_library"
-    core_fields = (
-        *COMMON_TARGET_FIELDS,
-        Dependencies,
-        OCamlPackagesField,
-    )
-    help = "A logical OCaml library target that aggregates module/library dependencies."
-
-
 class OCamlBinary(Target):
     alias = "ocaml_binary"
     core_fields = (
         *COMMON_TARGET_FIELDS,
         OCamlDependencyNamesField,
-        OCamlEntrySourceField,
+        OCamlEntryField,
         OCamlPlatformField,
         OCamlPackagesField,
         OCamlLinkFlagsField,

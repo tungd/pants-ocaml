@@ -4,35 +4,7 @@ from __future__ import annotations
 
 from dataclasses import fields
 
-import pytest
-
-from pants.engine.fs import Digest
-
-from ocaml.providers import BuiltOCamlBinary, BuiltOCamlPackage, OCamlClosure
-
-
-class TestOCamlClosure:
-    """Tests for OCamlClosure provider."""
-
-    def test_has_digest_field(self) -> None:
-        """Test that OCamlClosure has digest field."""
-        field_names = {f.name for f in fields(OCamlClosure)}
-        assert "digest" in field_names
-
-    def test_has_cmo_files_field(self) -> None:
-        """Test that OCamlClosure has cmo_files field."""
-        field_names = {f.name for f in fields(OCamlClosure)}
-        assert "cmo_files" in field_names
-
-    def test_has_include_dirs_field(self) -> None:
-        """Test that OCamlClosure has include_dirs field."""
-        field_names = {f.name for f in fields(OCamlClosure)}
-        assert "include_dirs" in field_names
-
-    def test_has_link_packages_field(self) -> None:
-        """Test that OCamlClosure has link_packages field."""
-        field_names = {f.name for f in fields(OCamlClosure)}
-        assert "link_packages" in field_names
+from ocaml.providers import BuiltOCamlBinary, BuiltOCamlPackage
 
 
 class TestBuiltOCamlPackage:

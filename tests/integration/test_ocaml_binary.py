@@ -2,18 +2,7 @@
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
-from typing import TYPE_CHECKING
-
 import pytest
-from pants.build_graph.address import Address
-from pants.engine.internals.scheduler_test import run_rule
-from pants.testutil.rule_runner import QueryInfo
-from pants.testutil.target_util import create_target_dict
-
-if TYPE_CHECKING:
-    from collections.abc import Iterator
 
 
 class TestOCamlBinaryPlatformField:
@@ -125,14 +114,14 @@ class TestNoWorkerArtifact:
 
     def test_ocaml_worker_artifact_target_removed(self) -> None:
         """Test that OCamlWorkerArtifact target type does not exist."""
-        from ocaml.target_types import target_types as all_types
+        import ocaml.target_types as all_types
 
         # Check that OCamlWorkerArtifact is not exported
         assert not hasattr(all_types, "OCamlWorkerArtifact")
 
     def test_worker_fields_removed(self) -> None:
         """Test that worker-related fields have been removed."""
-        from ocaml.target_types import target_types as all_types
+        import ocaml.target_types as all_types
 
         # Check that worker-related fields are not exported
         assert not hasattr(all_types, "OCamlBinaryAddressField")
