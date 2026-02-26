@@ -36,19 +36,6 @@ jobs:
           gha-cache-key: v0
           named-caches-hash: ${{ hashFiles('**/pants.toml') }}
 
-      - name: Update scie-pants
-        run: |
-          for i in 1 2 3; do
-            if SCIE_BOOT=update pants; then
-              exit 0
-            fi
-            if [ "$i" -eq 3 ]; then
-              echo "::error::Failed to update scie-pants after retries"
-              exit 1
-            fi
-            sleep $((i * 5))
-          done
-
       - name: Validate no worker artifact references
         run: |
           if grep -r "OCamlWorkerArtifact" . --include="*.py" --exclude-dir="tests" 2>/dev/null; then
@@ -67,13 +54,18 @@ jobs:
 
       - name: Run plugin tests
         run: |
-          for i in 1 2 3; do
+          set -euo pipefail
+
+          # Use scie-pants only; retry bootstrap/tests with exponential-ish backoff.
+          for i in 1 2 3 4 5; do
             if pants --version && pants test tests::; then
               exit 0
             fi
-            if [ "$i" -eq 3 ]; then
-              echo "::error::Pants bootstrap/test failed after retries"
-              exit 1
-            fi
-            sleep $((i * 10))
+            echo "::warning::Pants bootstrap/test attempt ${i} failed; clearing nce cache and retrying."
+            rm -rf "$HOME/.cache/nce" || true
+            rm -rf "$HOME/.cache/pants/setup" || true
+            sleep $((i * 15))
           done
+
+          echo "::error::Pants bootstrap/test failed after retries."
+          exit 1
