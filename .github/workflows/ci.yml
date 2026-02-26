@@ -56,4 +56,5 @@ jobs:
         run: pants --version
 
       - name: Run plugin tests
-        run: pants test tests::
+        run: |
+          pants test tests::
