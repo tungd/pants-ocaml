@@ -48,15 +48,6 @@ class OCamlCompilerFlagsField(StringSequenceField):
     help = "Additional flags passed to ocamlc when compiling modules/packages."
 
 
-class OCamlGeneratedSourcesField(StringSequenceField):
-    alias = "generated_sources"
-    default = ()
-    help = (
-        "Addresses of adhoc_tool targets that generate `.ml`/`.mli` files to include when "
-        "compiling this package."
-    )
-
-
 class OCamlLinkFlagsField(StringSequenceField):
     alias = "link_flags"
     default = ()
@@ -83,7 +74,6 @@ class OCamlPackage(Target):
         OCamlPackageSourcesField,
         OCamlDependencyNamesField,
         OCamlExposedModulesField,
-        OCamlGeneratedSourcesField,
         OCamlCompilerFlagsField,
     )
     help = "A package-level OCaml target that recursively scans sources and compiles via ocamldep order."

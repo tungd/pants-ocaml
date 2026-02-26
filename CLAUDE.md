@@ -14,7 +14,6 @@ To use this backend, add it to your `pants.toml`:
 [GLOBAL]
 backend_packages = [
     "pants.core",
-    "pants.backend.adhoc",  # Required for generated_sources support
     "ocaml",  # This package
 ]
 ```
@@ -31,7 +30,6 @@ The backend defines 2 target types:
 - `sources` - Source files (`.ml`/`.mli`)
 - `dependencies` (named) - For `ocaml_package`/`ocaml_binary`: Package names that resolve to `//{name}:{name}` internally or external ocamlfind packages
 - `exposed` - Module names to publicly expose from a package
-- `generated_sources` - Addresses of `adhoc_tool` targets that generate `.ml`/`.mli` files
 - `packages` - External ocamlfind package dependencies
 - `compiler_flags` - Extra flags for ocamlc compilation
 - `link_flags` - Extra flags for linker
@@ -100,7 +98,6 @@ The backend automatically configures `PATH`, `HOME`, and `OPAMROOT` environment 
 
 - Packages use `ocamldep -sort` to compute correct module compilation order
 - Interface files (`.mli`) are compiled before implementation files (`.ml`)
-- Generated sources from `adhoc_tool` targets are merged with package sources
 
 ### Output Directory Structure
 

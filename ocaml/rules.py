@@ -7,20 +7,7 @@ from pathlib import Path
 import os
 import shlex
 
-from pants.backend.adhoc.target_types import (
-    AdhocToolOutputDirectoriesField,
-    AdhocToolOutputFilesField,
-    AdhocToolRunnableField,
-    AdhocToolSourcesField,
-    AdhocToolTarget,
-)
 from pants.build_graph.address import Address, AddressInput
-from pants.core.goals.package import (
-    BuiltPackage,
-    BuiltPackageArtifact,
-    PackageFieldSet,
-)
-from pants.core.target_types import FileSourceField
 from pants.engine.fs import (
     CreateDigest,
     Digest,
@@ -31,7 +18,6 @@ from pants.engine.internals.selectors import Get, MultiGet
 from pants.engine.process import Process, ProcessResult
 from pants.engine.rules import collect_rules, implicitly, rule
 from pants.engine.target import HydrateSourcesRequest, Target, WrappedTarget, WrappedTargetRequest
-from pants.engine.unions import UnionRule
 
 from ocaml.providers import BuiltOCamlBinary, BuiltOCamlPackage
 from ocaml.subsystem import OCamlToolsSubsystem
@@ -41,7 +27,6 @@ from ocaml.target_types import (
     OCamlDependencyNamesField,
     OCamlEntryField,
     OCamlExposedModulesField,
-    OCamlGeneratedSourcesField,
     OCamlLinkFlagsField,
     OCamlPackage,
     OCamlPackageSourcesField,
@@ -58,14 +43,6 @@ class BuildOCamlPackageRequest:
 @dataclass(frozen=True)
 class BuildOCamlBinaryRequest:
     address: Address
-
-
-@dataclass(frozen=True)
-class AdhocToolArtifactFieldSet(PackageFieldSet):
-    required_fields = (AdhocToolRunnableField, AdhocToolSourcesField)
-
-    output_files: AdhocToolOutputFilesField
-    output_directories: AdhocToolOutputDirectoriesField
 
 
 def _dedupe(items: tuple[str, ...] | list[str]) -> tuple[str, ...]:
@@ -195,34 +172,6 @@ async def _resolve_named_dependencies(
     return tuple(internal_targets), _dedupe(external_packages)
 
 
-async def _resolve_generated_source_targets(
-    owner: Address,
-    generated_source_addresses: tuple[str, ...],
-) -> tuple[Target, ...]:
-    targets: list[Target] = []
-    for raw_address in _dedupe(list(generated_source_addresses)):
-        if not raw_address:
-            continue
-
-        address = await _resolve_relative_address(
-            raw_address,
-            owner=owner,
-            field_alias=OCamlGeneratedSourcesField.alias,
-        )
-        wrapped = await _resolve_wrapped_target(
-            address,
-            f"`{OCamlGeneratedSourcesField.alias}` on `{owner}`",
-        )
-        if wrapped.target.alias != AdhocToolTarget.alias:
-            raise ValueError(
-                f"{owner} has non-`{AdhocToolTarget.alias}` generated source target "
-                f"`{wrapped.target.address}` of type `{wrapped.target.alias}`."
-            )
-        targets.append(wrapped.target)
-
-    return tuple(targets)
-
-
 async def _merge_or_create_empty(digests: tuple[Digest, ...]) -> Digest:
     if not digests:
         return await Get(Digest, CreateDigest(()))
@@ -285,59 +234,7 @@ async def build_ocaml_package(
         **implicitly(),
     )
     source_files = tuple(sorted(hydrated.snapshot.files))
-
-    generated_source_specs = tuple(target[OCamlGeneratedSourcesField].value or ())
-    generated_source_targets = await _resolve_generated_source_targets(
-        target.address, generated_source_specs
-    )
-    generated_hydrated_sources = (
-        await MultiGet(
-            hydrate_sources(
-                HydrateSourcesRequest(
-                    generated_target[AdhocToolSourcesField],
-                    for_sources_types=(FileSourceField,),
-                    enable_codegen=True,
-                ),
-                **implicitly(),
-            )
-            for generated_target in generated_source_targets
-        )
-        if generated_source_targets
-        else ()
-    )
-
-    generated_source_files: list[str] = []
-    generated_path_to_target: dict[str, Address] = {}
-    for generated_target, generated_hydrated in zip(
-        generated_source_targets, generated_hydrated_sources
-    ):
-        if generated_hydrated.sources_type is None:
-            raise ValueError(
-                f"{target.address} failed to generate sources from `{generated_target.address}`."
-            )
-        for generated_file in generated_hydrated.snapshot.files:
-            if not generated_file.endswith((".ml", ".mli")):
-                raise ValueError(
-                    f"{target.address} generated source target `{generated_target.address}` produced "
-                    f"`{generated_file}`, which is not a `.ml` or `.mli` file."
-                )
-            generated_source_files.append(generated_file)
-            existing_target = generated_path_to_target.get(generated_file)
-            if existing_target is not None and existing_target != generated_target.address:
-                raise ValueError(
-                    f"{target.address} has multiple generated source targets producing "
-                    f"`{generated_file}`: `{existing_target}` and `{generated_target.address}`."
-                )
-            generated_path_to_target[generated_file] = generated_target.address
-
-    colliding_paths = sorted(set(source_files).intersection(generated_source_files))
-    if colliding_paths:
-        collisions = ", ".join(colliding_paths)
-        raise ValueError(
-            f"{target.address} has generated source path collisions with package sources: {collisions}"
-        )
-
-    all_source_files = tuple(sorted([*source_files, *generated_source_files]))
+    all_source_files = source_files
 
     ml_files = tuple(f for f in all_source_files if f.endswith(".ml"))
     mli_files = tuple(f for f in all_source_files if f.endswith(".mli"))
@@ -824,39 +721,7 @@ async def _link_js_of_ocaml_binary(
     return BuiltOCamlBinary(digest=js_result.output_digest, output_path=js_path, platform="js_of_ocaml")
 
 
-@rule(desc="Package adhoc tool outputs")
-async def package_adhoc_tool_artifact(
-    field_set: AdhocToolArtifactFieldSet,
-) -> BuiltPackage:
-    wrapped = await _resolve_wrapped_target(field_set.address, f"the target `{field_set.address}`")
-    target = wrapped.target
-    if target.alias != AdhocToolTarget.alias:
-        raise ValueError(
-            f"Expected `{AdhocToolTarget.alias}` target for packaging, got `{target.alias}`"
-        )
-
-    generated_sources = await hydrate_sources(
-        HydrateSourcesRequest(
-            target[AdhocToolSourcesField],
-            for_sources_types=(FileSourceField,),
-            enable_codegen=True,
-        ),
-        **implicitly(),
-    )
-    if generated_sources.sources_type is None:
-        raise ValueError(f"{field_set.address} failed to generate packageable source outputs.")
-    artifact_paths = tuple(sorted(generated_sources.snapshot.files))
-    if not artifact_paths:
-        raise ValueError(f"{field_set.address} produced no files to package.")
-
-    return BuiltPackage(
-        digest=generated_sources.snapshot.digest,
-        artifacts=tuple(BuiltPackageArtifact(relpath=path) for path in artifact_paths),
-    )
-
-
 def rules() -> list:
     return [
         *collect_rules(),
-        UnionRule(PackageFieldSet, AdhocToolArtifactFieldSet),
     ]

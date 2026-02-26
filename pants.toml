@@ -3,6 +3,8 @@ pants_version = "2.30.0"
 backend_packages = [
   "pants.backend.python",
   "pants.backend.plugin_development",
-  "pants.backend.adhoc",
   "ocaml",
 ]
+
+[python]
+interpreter_constraints = ["==3.14.*"]

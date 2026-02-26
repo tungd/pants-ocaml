@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from pants.backend.adhoc.target_types import AdhocToolTarget
 from pants.testutil.option_util import create_subsystem
 from pants.testutil.rule_runner import RuleRunner
 
@@ -87,7 +86,6 @@ def create_ocaml_rule_runner(*extra_target_types: type, extra_options: dict | No
         target_types=[
             OCamlPackage,
             OCamlBinary,
-            AdhocToolTarget,
             *extra_target_types,
         ],
         rules=[],

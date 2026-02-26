@@ -13,8 +13,7 @@ This is a custom [[https://www.pantsbuild.org][Pants]] backend for OCaml that ad
 - Multi-platform compilation support:
   - ~bytecode~: Uses ~ocamlc~, produces ~.byte~ files (default, most compatible)
   - ~native~: Uses ~ocamlopt~, produces native executables (best performance)
-  - ~js_of_ocaml~: Uses ~ocamlc~ + ~js_of_ocaml~, produces ~.js~ files for web/Node.js
-- Support for generated sources via Pants ~adhoc_tool~ targets
+- ~js_of_ocaml~: Uses ~ocamlc~ + ~js_of_ocaml~, produces ~.js~ files for web/Node.js
 - Fine-grained caching and parallel execution via the Pants engine
 
 * Installation
@@ -25,7 +24,6 @@ Add to your ~pants.toml~:
 [GLOBAL]
 backend_packages = [
     "pants.core",
-    "pants.backend.adhoc",  # Required for generated_sources support
     "ocaml",  # This package
 ]
 #+end_src
@@ -78,7 +76,6 @@ Fields:
 - ~sources~: Source file globs (default: ~"**/*.ml"~ and ~"**/*.mli"~)
 - ~dependencies~: Package names (resolve to ~//{name}:{name}~ internally or external ocamlfind packages)
 - ~exposed~: Public module names (empty = all modules exposed)
-- ~generated_sources~: Addresses of ~adhoc_tool~ targets that generate ~.ml~/~.mli~ files
 - ~compiler_flags~: Extra flags for the compiler
 
 ** ~ocaml_binary~
@@ -184,24 +181,6 @@ Build the binaries:
 # Build JavaScript
 ./pants package src:handler_js
 # Output: dist/handler_js.js
-#+end_src
-
-** Generated Sources
-
-Use ~adhoc_tool~ to generate OCaml sources:
-
-#+begin_src python
-# BUILD
-adhoc_tool(
-    name="gen_protocol",
-    executable="/path/to/codegen",
-    output_files=["protocol.ml", "protocol.mli"],
-)
-
-ocaml_package(
-    name="app",
-    generated_sources=[":gen_protocol"],
-)
 #+end_src
 
 * Common Commands

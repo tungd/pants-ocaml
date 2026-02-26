@@ -12,7 +12,6 @@ from ocaml.target_types import (
     OCamlDependencyNamesField,
     OCamlEntryField,
     OCamlExposedModulesField,
-    OCamlGeneratedSourcesField,
     OCamlLinkFlagsField,
     OCamlPackage,
     OCamlPackageSourcesField,
@@ -101,7 +100,6 @@ class TestOCamlPackage:
         assert OCamlPackageSourcesField in field_classes
         assert OCamlDependencyNamesField in field_classes
         assert OCamlExposedModulesField in field_classes
-        assert OCamlGeneratedSourcesField in field_classes
         assert OCamlCompilerFlagsField in field_classes
 
 
