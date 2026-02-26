@@ -119,7 +119,7 @@ async def _resolve_relative_address(raw_value: str, owner: Address, field_alias:
         relative_to=owner.spec_path,
         description_of_origin=f"the `{field_alias}` field on `{owner}`",
     )
-    return await Get(Address, AddressInput, address_input)
+    return await Get(Address, address_input)
 
 
 async def _resolve_wrapped_target(address: Address, description_of_origin: str) -> WrappedTarget:
@@ -135,7 +135,7 @@ async def _resolve_internal_package_by_name(name: str) -> Target | None:
             f"//{name}:{name}",
             description_of_origin=f"ocaml package name `{name}`",
         )
-        address = await Get(Address, AddressInput, address_input)
+        address = await Get(Address, address_input)
         wrapped = await _resolve_wrapped_target(address, f"ocaml package name `{name}`")
     except Exception:
         return None
@@ -395,7 +395,7 @@ async def build_ocaml_package(
         output_files=output_files,
         description=f"Compile OCaml package {target.address}",
     )
-    compile_result = await Get(ProcessResult, Process, process)
+    compile_result = await Get(ProcessResult, process)
 
     closure_digest = await _merge_or_create_empty(
         (
@@ -584,7 +584,7 @@ async def _link_bytecode_binary(
         output_files=(output_path,),
         description=f"Link OCaml bytecode binary {target.address}",
     )
-    result = await Get(ProcessResult, Process, process)
+    result = await Get(ProcessResult, process)
 
     return BuiltOCamlBinary(digest=result.output_digest, output_path=output_path, platform="bytecode")
 
@@ -639,7 +639,7 @@ async def _link_native_binary(
         output_files=(output_path,),
         description=f"Link OCaml native binary {target.address}",
     )
-    result = await Get(ProcessResult, Process, process)
+    result = await Get(ProcessResult, process)
 
     return BuiltOCamlBinary(digest=result.output_digest, output_path=output_path, platform="native")
 
@@ -692,7 +692,7 @@ async def _link_js_of_ocaml_binary(
         output_files=(bytecode_path,),
         description=f"Link OCaml bytecode for js_of_ocaml {target.address}",
     )
-    bytecode_result = await Get(ProcessResult, Process, bytecode_process)
+    bytecode_result = await Get(ProcessResult, bytecode_process)
 
     # Step 2: Convert bytecode to JavaScript
     js_script = "\n".join(
@@ -716,7 +716,7 @@ async def _link_js_of_ocaml_binary(
         output_files=(js_path,),
         description=f"Convert to JavaScript {target.address}",
     )
-    js_result = await Get(ProcessResult, Process, js_process)
+    js_result = await Get(ProcessResult, js_process)
 
     return BuiltOCamlBinary(digest=js_result.output_digest, output_path=js_path, platform="js_of_ocaml")
 
