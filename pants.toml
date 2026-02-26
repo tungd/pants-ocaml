@@ -5,6 +5,7 @@ backend_packages = [
   "pants.backend.plugin_development",
   "ocaml",
 ]
+pythonpath = ["%(buildroot)s"]
 
 [python]
 interpreter_constraints = ["==3.14.*"]
