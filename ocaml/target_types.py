@@ -74,6 +74,7 @@ class OCamlPackage(Target):
         OCamlPackageSourcesField,
         OCamlDependencyNamesField,
         OCamlExposedModulesField,
+        OCamlPackagesField,
         OCamlCompilerFlagsField,
     )
     help = "A package-level OCaml target that recursively scans sources and compiles via ocamldep order."

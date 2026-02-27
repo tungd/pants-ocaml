@@ -2,12 +2,67 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 import pytest
 from pants.build_graph.address import Address
 from pants.testutil.rule_runner import RuleRunner
 
 from ocaml.providers import BuiltOCamlBinary, BuiltOCamlPackage
 from ocaml.rules import BuildOCamlBinaryRequest, BuildOCamlPackageRequest
+
+
+def _write_mock_ocaml_tools(tmp_path: Path) -> tuple[str, str]:
+    ocamlfind = tmp_path / "mock_ocamlfind.sh"
+    ocamlfind.write_text(
+        """#!/bin/bash
+set -euo pipefail
+
+out=""
+prev=""
+for arg in "$@"; do
+  if [[ "$prev" == "-o" ]]; then
+    out="$arg"
+    break
+  fi
+  prev="$arg"
+done
+
+if [[ -z "$out" ]]; then
+  exit 0
+fi
+
+mkdir -p "$(dirname "$out")"
+: > "$out"
+
+if [[ "$out" == *.cmo ]]; then
+  : > "${out%.cmo}.cmi"
+fi
+
+if [[ "$out" == *.cmx ]]; then
+  : > "${out%.cmx}.o"
+fi
+"""
+    )
+
+    ocamldep = tmp_path / "mock_ocamldep.sh"
+    ocamldep.write_text(
+        """#!/bin/bash
+set -euo pipefail
+
+for arg in "$@"; do
+  if [[ "$arg" == *.ml ]]; then
+    printf "%s " "$arg"
+  fi
+done
+printf "\\n"
+"""
+    )
+
+    os.chmod(ocamlfind, 0o755)
+    os.chmod(ocamldep, 0o755)
+    return str(ocamlfind), str(ocamldep)
 
 
 def _write_sample_project(rule_runner: RuleRunner) -> None:
@@ -93,3 +148,48 @@ def test_build_ocaml_package_compiles_modules(ocaml_rule_runner: RuleRunner) -> 
     assert any(path.endswith("/greeter.cmo") for path in result.transitive_cmo_files)
     assert any(path.endswith("/main.cmo") for path in result.transitive_cmo_files)
     assert result.digest.fingerprint
+
+
+def test_build_ocaml_package_includes_self_packages_in_transitive_deps(
+    ocaml_rule_runner: RuleRunner,
+    tmp_path: Path,
+) -> None:
+    ocamlfind, ocamldep = _write_mock_ocaml_tools(tmp_path)
+    ocaml_rule_runner.set_options(
+        [
+            f"--ocaml-tools-ocamlfind={ocamlfind}",
+            f"--ocaml-tools-ocamldep={ocamldep}",
+        ]
+    )
+    ocaml_rule_runner.write_files(
+        {
+            "dep/BUILD": """
+ocaml_package(
+    name="dep",
+    packages=["dep_pkg", "shared_pkg"],
+)
+""",
+            "dep/dep.ml": "let value = 1\n",
+            "consumer/BUILD": """
+ocaml_package(
+    name="consumer",
+    dependencies=["dep", "shared_pkg", "top_only_pkg"],
+    packages=["self_pkg", "shared_pkg"],
+)
+""",
+            "consumer/consumer.ml": "let value = Dep.value\n",
+        }
+    )
+
+    result = ocaml_rule_runner.request(
+        BuiltOCamlPackage,
+        [BuildOCamlPackageRequest(Address("consumer", target_name="consumer"))],
+    )
+
+    assert result.external_dependency_names == ("shared_pkg", "top_only_pkg")
+    assert result.transitive_external_dependency_names == (
+        "dep_pkg",
+        "shared_pkg",
+        "top_only_pkg",
+        "self_pkg",
+    )

@@ -284,9 +284,10 @@ async def build_ocaml_package(
         [name for dep in dep_packages for name in dep.transitive_external_dependency_names]
     )
 
-    compiler_dependency_names = _dedupe([*dep_external_names, *external_dep_names])
-
     self_compiler_flags = tuple(target[OCamlCompilerFlagsField].value or ())
+    self_packages = tuple(target[OCamlPackagesField].value or ())
+
+    compiler_dependency_names = _dedupe([*dep_external_names, *external_dep_names, *self_packages])
 
     private_include_dir = _target_output_dir("package_private", target.address)
     public_include_dir = _target_output_dir("package_public", target.address)
