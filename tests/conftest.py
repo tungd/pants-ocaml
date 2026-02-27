@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from pants.engine.internals import graph
 from pants.engine.rules import QueryRule
 from pants.testutil.option_util import create_subsystem
 from pants.testutil.rule_runner import RuleRunner
@@ -93,6 +94,7 @@ def create_ocaml_rule_runner(*extra_target_types: type, extra_options: dict | No
             *extra_target_types,
         ],
         rules=[
+            *graph.rules(),
             *ocaml_rules.rules(),
             QueryRule(BuiltOCamlPackage, (BuildOCamlPackageRequest,)),
             QueryRule(BuiltOCamlBinary, (BuildOCamlBinaryRequest,)),

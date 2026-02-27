@@ -286,7 +286,6 @@ async def build_ocaml_package(
     input_digest = await _merge_or_create_empty(
         (
             hydrated.snapshot.digest,
-            *tuple(generated.snapshot.digest for generated in generated_hydrated_sources),
             *tuple(dep.digest for dep in dep_packages),
         )
     )
@@ -335,6 +334,16 @@ async def build_ocaml_package(
             compiler_flags,
         ]
     )
+    compile_native_prefix = _join_shell(
+        [
+            _shell_command(ocaml_tools.ocamlfind),
+            "ocamlopt",
+            package_arg,
+            "-c",
+            include_args,
+            compiler_flags,
+        ]
+    )
 
     script_lines = [
         "set -euo pipefail",
@@ -343,6 +352,8 @@ async def build_ocaml_package(
     ]
 
     own_cmo_files: list[str] = []
+    own_cmx_files: list[str] = []
+    own_o_files: list[str] = []
     own_cmi_files: list[str] = []
     public_cmi_files: list[str] = []
     source_to_cmo: list[tuple[str, str]] = []
@@ -352,6 +363,8 @@ async def build_ocaml_package(
     for ml in ordered_ml:
         stem = Path(ml).stem
         cmo_path = f"{private_include_dir}/{stem}.cmo"
+        cmx_path = f"{private_include_dir}/{stem}.cmx"
+        native_obj_path = f"{private_include_dir}/{stem}.o"
         cmi_path = f"{private_include_dir}/{stem}.cmi"
 
         mli = mli_by_stem.get(stem)
@@ -374,6 +387,14 @@ async def build_ocaml_package(
                 shlex.quote(cmo_path),
             ])
         )
+        script_lines.append(
+            _join_shell([
+                compile_native_prefix,
+                shlex.quote(ml),
+                "-o",
+                shlex.quote(cmx_path),
+            ])
+        )
 
         if stem in exposed_stems:
             public_cmi_path = f"{public_include_dir}/{stem}.cmi"
@@ -383,10 +404,14 @@ async def build_ocaml_package(
             public_cmi_files.append(public_cmi_path)
 
         own_cmo_files.append(cmo_path)
+        own_cmx_files.append(cmx_path)
+        own_o_files.append(native_obj_path)
         own_cmi_files.append(cmi_path)
         source_to_cmo.append((ml, cmo_path))
 
-    output_files = tuple(_dedupe([*own_cmo_files, *own_cmi_files, *public_cmi_files]))
+    output_files = tuple(
+        _dedupe([*own_cmo_files, *own_cmx_files, *own_o_files, *own_cmi_files, *public_cmi_files])
+    )
 
     process = Process(
         argv=(ocaml_tools.bash, "-c", "\n".join(script_lines)),
@@ -496,41 +521,134 @@ async def build_ocaml_binary(
     platform = target[OCamlPlatformField].value or "bytecode"
 
     if platform == "bytecode":
-        return await _link_bytecode_binary(
-            target,
-            ocaml_tools,
-            all_cmo_files,
-            all_include_dirs,
-            all_external_names,
-            self_link_flags,
-            input_digest,
-            output_dir,
-            output_basename,
+        output_path = f"{output_dir}/{output_basename}.byte"
+        package_arg = f"-package {shlex.quote(','.join(all_external_names))}" if all_external_names else ""
+        include_args = " ".join(f"-I {shlex.quote(inc)}" for inc in all_include_dirs)
+        link_flags = " ".join(shlex.quote(flag) for flag in self_link_flags)
+        cmo_args = " ".join(shlex.quote(cmo) for cmo in all_cmo_files)
+
+        script = "\n".join(
+            [
+                "set -euo pipefail",
+                f"mkdir -p {shlex.quote(output_dir)}",
+                _join_shell(
+                    [
+                        _shell_command(ocaml_tools.ocamlfind),
+                        "ocamlc",
+                        "-linkpkg",
+                        package_arg,
+                        include_args,
+                        link_flags,
+                        cmo_args,
+                        "-o",
+                        shlex.quote(output_path),
+                    ]
+                ),
+            ]
         )
+        process = Process(
+            argv=(ocaml_tools.bash, "-c", script),
+            env=_tool_process_env(ocaml_tools),
+            input_digest=input_digest,
+            output_files=(output_path,),
+            description=f"Link OCaml bytecode binary {target.address}",
+        )
+        result = await Get(ProcessResult, Process, process)
+        return BuiltOCamlBinary(digest=result.output_digest, output_path=output_path, platform="bytecode")
     elif platform == "native":
-        return await _link_native_binary(
-            target,
-            ocaml_tools,
-            all_cmo_files,
-            all_include_dirs,
-            all_external_names,
-            self_link_flags,
-            input_digest,
-            output_dir,
-            output_basename,
+        output_path = f"{output_dir}/{output_basename}"
+        cmx_files = tuple(cmo.replace(".cmo", ".cmx") for cmo in all_cmo_files)
+        package_arg = f"-package {shlex.quote(','.join(all_external_names))}" if all_external_names else ""
+        include_args = " ".join(f"-I {shlex.quote(inc)}" for inc in all_include_dirs)
+        link_flags = " ".join(shlex.quote(flag) for flag in self_link_flags)
+        cmx_args = " ".join(shlex.quote(cmx) for cmx in cmx_files)
+
+        script = "\n".join(
+            [
+                "set -euo pipefail",
+                f"mkdir -p {shlex.quote(output_dir)}",
+                _join_shell(
+                    [
+                        _shell_command(ocaml_tools.ocamlfind),
+                        "ocamlopt",
+                        "-linkpkg",
+                        package_arg,
+                        include_args,
+                        link_flags,
+                        cmx_args,
+                        "-o",
+                        shlex.quote(output_path),
+                    ]
+                ),
+            ]
         )
+        process = Process(
+            argv=(ocaml_tools.bash, "-c", script),
+            env=_tool_process_env(ocaml_tools),
+            input_digest=input_digest,
+            output_files=(output_path,),
+            description=f"Link OCaml native binary {target.address}",
+        )
+        result = await Get(ProcessResult, Process, process)
+        return BuiltOCamlBinary(digest=result.output_digest, output_path=output_path, platform="native")
     elif platform == "js_of_ocaml":
-        return await _link_js_of_ocaml_binary(
-            target,
-            ocaml_tools,
-            all_cmo_files,
-            all_include_dirs,
-            all_external_names,
-            self_link_flags,
-            input_digest,
-            output_dir,
-            output_basename,
+        bytecode_path = f"{output_dir}/{output_basename}.byte"
+        js_path = f"{output_dir}/{output_basename}.js"
+        package_arg = f"-package {shlex.quote(','.join(all_external_names))}" if all_external_names else ""
+        include_args = " ".join(f"-I {shlex.quote(inc)}" for inc in all_include_dirs)
+        link_flags = " ".join(shlex.quote(flag) for flag in self_link_flags)
+        cmo_args = " ".join(shlex.quote(cmo) for cmo in all_cmo_files)
+
+        bytecode_script = "\n".join(
+            [
+                "set -euo pipefail",
+                f"mkdir -p {shlex.quote(output_dir)}",
+                _join_shell(
+                    [
+                        _shell_command(ocaml_tools.ocamlfind),
+                        "ocamlc",
+                        "-linkpkg",
+                        package_arg,
+                        include_args,
+                        link_flags,
+                        cmo_args,
+                        "-o",
+                        shlex.quote(bytecode_path),
+                    ]
+                ),
+            ]
         )
+        bytecode_process = Process(
+            argv=(ocaml_tools.bash, "-c", bytecode_script),
+            env=_tool_process_env(ocaml_tools),
+            input_digest=input_digest,
+            output_files=(bytecode_path,),
+            description=f"Link OCaml bytecode for js_of_ocaml {target.address}",
+        )
+        bytecode_result = await Get(ProcessResult, Process, bytecode_process)
+
+        js_script = "\n".join(
+            [
+                "set -euo pipefail",
+                _join_shell(
+                    [
+                        _shell_command(ocaml_tools.js_of_ocaml),
+                        shlex.quote(bytecode_path),
+                        "-o",
+                        shlex.quote(js_path),
+                    ]
+                ),
+            ]
+        )
+        js_process = Process(
+            argv=(ocaml_tools.bash, "-c", js_script),
+            env=_tool_process_env(ocaml_tools),
+            input_digest=bytecode_result.output_digest,
+            output_files=(js_path,),
+            description=f"Convert to JavaScript {target.address}",
+        )
+        js_result = await Get(ProcessResult, Process, js_process)
+        return BuiltOCamlBinary(digest=js_result.output_digest, output_path=js_path, platform="js_of_ocaml")
     else:
         raise ValueError(
             f"{target.address} has unknown platform `{platform}`. "
@@ -548,7 +666,7 @@ async def _link_bytecode_binary(
     input_digest: Digest,
     output_dir: str,
     output_basename: str,
-) -> BuiltOCamlBinary:
+) -> "BuiltOCamlBinary":
     """Link a bytecode executable using ocamlc."""
     output_path = f"{output_dir}/{output_basename}.byte"
 
@@ -599,7 +717,7 @@ async def _link_native_binary(
     input_digest: Digest,
     output_dir: str,
     output_basename: str,
-) -> BuiltOCamlBinary:
+) -> "BuiltOCamlBinary":
     """Link a native executable using ocamlopt."""
     output_path = f"{output_dir}/{output_basename}"
 
@@ -654,7 +772,7 @@ async def _link_js_of_ocaml_binary(
     input_digest: Digest,
     output_dir: str,
     output_basename: str,
-) -> BuiltOCamlBinary:
+) -> "BuiltOCamlBinary":
     """Compile to bytecode then convert to JavaScript using js_of_ocaml."""
     bytecode_path = f"{output_dir}/{output_basename}.byte"
     js_path = f"{output_dir}/{output_basename}.js"

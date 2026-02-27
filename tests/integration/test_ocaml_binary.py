@@ -12,15 +12,13 @@ class TestOCamlBinaryPlatformField:
         """Test that bytecode is the default platform."""
         from ocaml.target_types import OCamlPlatformField
 
-        field = OCamlPlatformField()
-        assert field.default == "bytecode"
+        assert OCamlPlatformField.default == "bytecode"
 
     def test_platform_valid_choices(self) -> None:
         """Test that platform field accepts only valid choices."""
         from ocaml.target_types import OCamlPlatformField
 
-        field = OCamlPlatformField()
-        assert field.valid_choices == ("bytecode", "native", "js_of_ocaml")
+        assert OCamlPlatformField.valid_choices == ("bytecode", "native", "js_of_ocaml")
 
 
 class TestBuiltOCamlBinaryProvider:
@@ -164,17 +162,15 @@ def test_platform_field_is_backward_compatible():
     """Test that platform field is backward compatible (default is bytecode)."""
     from ocaml.target_types import OCamlPlatformField
 
-    field = OCamlPlatformField()
     # Existing binaries without explicit platform field should default to bytecode
-    assert field.default == "bytecode"
+    assert OCamlPlatformField.default == "bytecode"
 
 
 def test_all_three_platforms_are_valid():
     """Test that all three platforms are valid choices."""
     from ocaml.target_types import OCamlPlatformField
 
-    field = OCamlPlatformField()
-    valid_platforms = field.valid_choices
+    valid_platforms = OCamlPlatformField.valid_choices
 
     assert "bytecode" in valid_platforms
     assert "native" in valid_platforms

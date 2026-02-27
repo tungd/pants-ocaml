@@ -151,7 +151,7 @@ class TestTargetOutputDir:
     def test_missing_target_name_uses_fallback(self) -> None:
         address = Address("src")
         result = _target_output_dir("binary", address)
-        assert result == "__pants_ocaml__/binary/src/_unnamed_"
+        assert result == "__pants_ocaml__/binary/src/src"
 
 
 class TestBinaryOutputBasename:
@@ -165,7 +165,7 @@ class TestBinaryOutputBasename:
         class FakeTarget:
             address = Address("src")
 
-        assert _binary_output_basename(FakeTarget(), "main.ml") == "main"
+        assert _binary_output_basename(FakeTarget(), "main.ml") == "src"
 
 
 class TestModuleNameFromStem:

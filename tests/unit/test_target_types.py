@@ -96,11 +96,10 @@ class TestOCamlPackage:
         assert issubclass(OCamlPackage, PantsTarget)
 
     def test_core_fields(self) -> None:
-        field_classes = [field.__class__ for field in OCamlPackage.core_fields]
-        assert OCamlPackageSourcesField in field_classes
-        assert OCamlDependencyNamesField in field_classes
-        assert OCamlExposedModulesField in field_classes
-        assert OCamlCompilerFlagsField in field_classes
+        assert OCamlPackageSourcesField in OCamlPackage.core_fields
+        assert OCamlDependencyNamesField in OCamlPackage.core_fields
+        assert OCamlExposedModulesField in OCamlPackage.core_fields
+        assert OCamlCompilerFlagsField in OCamlPackage.core_fields
 
 
 class TestOCamlBinary:
@@ -111,12 +110,11 @@ class TestOCamlBinary:
         assert issubclass(OCamlBinary, PantsTarget)
 
     def test_core_fields(self) -> None:
-        field_classes = [field.__class__ for field in OCamlBinary.core_fields]
-        assert OCamlDependencyNamesField in field_classes
-        assert OCamlEntryField in field_classes
-        assert OCamlPlatformField in field_classes
-        assert OCamlPackagesField in field_classes
-        assert OCamlLinkFlagsField in field_classes
+        assert OCamlDependencyNamesField in OCamlBinary.core_fields
+        assert OCamlEntryField in OCamlBinary.core_fields
+        assert OCamlPlatformField in OCamlBinary.core_fields
+        assert OCamlPackagesField in OCamlBinary.core_fields
+        assert OCamlLinkFlagsField in OCamlBinary.core_fields
 
 
 def test_registered_target_aliases() -> None:

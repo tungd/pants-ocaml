@@ -14,8 +14,7 @@ class TestOCamlToolsSubsystem:
 
     def test_ocamlfind_default(self) -> None:
         """Test ocamlfind default value."""
-        subsystem = OCamlToolsSubsystem()
-        # Note: Actual values come from Pants options system, this is a minimal check
+        # Values come from Pants options system; validate option existence at class level.
         assert hasattr(OCamlToolsSubsystem, "ocamlfind")
 
     def test_ocamldep_default(self) -> None:
