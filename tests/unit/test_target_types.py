@@ -16,6 +16,7 @@ from ocaml.target_types import (
     OCamlPackage,
     OCamlPackageSourcesField,
     OCamlPackagesField,
+    OCamlPpxPackagesField,
     OCamlPlatformField,
 )
 
@@ -72,6 +73,14 @@ class TestOCamlCompilerFlagsField:
         assert OCamlCompilerFlagsField.default == ()
 
 
+class TestOCamlPpxPackagesField:
+    def test_alias(self) -> None:
+        assert OCamlPpxPackagesField.alias == "ppx_packages"
+
+    def test_default(self) -> None:
+        assert OCamlPpxPackagesField.default == ()
+
+
 class TestOCamlLinkFlagsField:
     def test_alias(self) -> None:
         assert OCamlLinkFlagsField.alias == "link_flags"
@@ -99,6 +108,7 @@ class TestOCamlPackage:
         assert OCamlPackageSourcesField in OCamlPackage.core_fields
         assert OCamlDependencyNamesField in OCamlPackage.core_fields
         assert OCamlExposedModulesField in OCamlPackage.core_fields
+        assert OCamlPpxPackagesField in OCamlPackage.core_fields
         assert OCamlCompilerFlagsField in OCamlPackage.core_fields
 
 
@@ -115,6 +125,7 @@ class TestOCamlBinary:
         assert OCamlPlatformField in OCamlBinary.core_fields
         assert OCamlPackagesField in OCamlBinary.core_fields
         assert OCamlLinkFlagsField in OCamlBinary.core_fields
+        assert OCamlPpxPackagesField not in OCamlBinary.core_fields
 
 
 def test_registered_target_aliases() -> None:

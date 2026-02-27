@@ -76,7 +76,9 @@ Fields:
 - ~sources~: Source file globs (default: ~"**/*.ml"~ and ~"**/*.mli"~)
 - ~dependencies~: Package names (resolve to ~//{name}:{name}~ internally or external ocamlfind packages)
 - ~exposed~: Public module names (empty = all modules exposed)
-- ~compiler_flags~: Extra flags for the compiler
+- ~packages~: External ocamlfind packages used at compile/link time
+- ~ppx_packages~: PPX package names resolved via ~ocamlfind printppx~ (recommended for PPX workflows)
+- ~compiler_flags~: Extra compiler flags (escape hatch for uncommon/custom invocations)
 
 ** ~ocaml_binary~
 
@@ -126,6 +128,25 @@ ocaml_package(
     name="core",
     dependencies=["utils"],  # Resolves to //utils:utils internally
     packages=["str"],  # External ocamlfind package
+)
+#+end_src
+
+** PPX with js_of_ocaml
+
+#+begin_src python
+# src/web/BUILD
+ocaml_package(
+    name="web_pkg",
+    packages=["js_of_ocaml"],
+    ppx_packages=["js_of_ocaml-ppx"],  # Preferred PPX configuration
+    # compiler_flags=[...]  # Escape hatch only
+)
+
+ocaml_binary(
+    name="web_js",
+    dependencies=["web_pkg"],
+    entry="main.ml",
+    platform="js_of_ocaml",
 )
 #+end_src
 

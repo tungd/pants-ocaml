@@ -11,9 +11,12 @@ from ocaml.rules import (
     _js_of_ocaml_shell_parts,
     _join_shell,
     _module_name_from_stem,
+    _parse_printppx_output,
     _shell_command,
+    _shell_quote_parts,
     _split_command,
     _target_output_dir,
+    _tool_process_env,
 )
 
 
@@ -133,6 +136,68 @@ class TestJsOfOcamlShellParts:
         assert "--effects=cps" in parts
         assert parts[2] == "'bin/my app.byte'"
         assert parts[4] == "'dist/my app.js'"
+
+
+class TestParsePrintppxOutput:
+    def test_parses_multiple_ppx_commands(self) -> None:
+        address = Address("src/demo", target_name="demo")
+        output = '-ppx "/tmp/ppx-a --as-ppx" -ppx "/tmp/ppx-b --flag"'
+
+        result = _parse_printppx_output(
+            output,
+            owner=address,
+            ppx_packages=("pkg_a", "pkg_b"),
+        )
+
+        assert result == (
+            "-ppx",
+            "/tmp/ppx-a --as-ppx",
+            "-ppx",
+            "/tmp/ppx-b --flag",
+        )
+
+    def test_rejects_empty_output(self) -> None:
+        with pytest.raises(ValueError, match="returned empty output"):
+            _parse_printppx_output(
+                "  \n",
+                owner=Address("src/demo", target_name="demo"),
+                ppx_packages=("js_of_ocaml-ppx",),
+            )
+
+    def test_rejects_output_without_ppx_flag(self) -> None:
+        with pytest.raises(ValueError, match="did not produce any `-ppx` arguments"):
+            _parse_printppx_output(
+                "--foo bar",
+                owner=Address("src/demo", target_name="demo"),
+                ppx_packages=("js_of_ocaml-ppx",),
+            )
+
+    def test_rejects_trailing_ppx_without_command(self) -> None:
+        with pytest.raises(ValueError, match="without a preprocessor command"):
+            _parse_printppx_output(
+                "-ppx",
+                owner=Address("src/demo", target_name="demo"),
+                ppx_packages=("js_of_ocaml-ppx",),
+            )
+
+
+class TestShellQuoteParts:
+    def test_quotes_printppx_parts(self) -> None:
+        result = _shell_quote_parts(("-ppx", "/tmp/ppx.exe --as-ppx"))
+        assert result == "-ppx '/tmp/ppx.exe --as-ppx'"
+
+
+class TestToolProcessEnv:
+    def test_includes_caml_ld_library_path_when_present(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        class DummyTools:
+            ocamlfind = "ocamlfind"
+            ocamldep = "ocamldep"
+            ocamlopt = "ocamlopt"
+            js_of_ocaml = "js_of_ocaml"
+
+        monkeypatch.setenv("CAML_LD_LIBRARY_PATH", "/tmp/stublibs")
+        env = _tool_process_env(DummyTools())
+        assert env["CAML_LD_LIBRARY_PATH"] == "/tmp/stublibs"
 
 
 class TestTargetOutputDir:

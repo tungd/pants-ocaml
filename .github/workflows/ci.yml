@@ -17,13 +17,13 @@ jobs:
       - name: Install OCaml toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y opam ocaml ocaml-findlib
+          sudo apt-get install -y opam ocaml ocaml-findlib libcurl4-openssl-dev pkg-config
 
-      - name: Install js_of_ocaml
+      - name: Install OCaml packages
         run: |
           opam init -y
           eval "$(opam env)"
-          opam install -y js_of_ocaml
+          opam install -y js_of_ocaml conf-libcurl curl
           echo "PATH=$PATH" >> "$GITHUB_ENV"
           echo "OPAMROOT=$(opam var root)" >> "$GITHUB_ENV"
           echo "OPAM_SWITCH_PREFIX=$(opam var prefix)" >> "$GITHUB_ENV"
@@ -63,6 +63,7 @@ jobs:
           command -v ocamldep
           command -v ocamlopt
           command -v js_of_ocaml
+          ocamlfind query curl
 
           # Use scie-pants only; retry bootstrap/tests with exponential-ish backoff.
           for i in 1 2 3 4 5; do

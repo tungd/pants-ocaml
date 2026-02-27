@@ -31,6 +31,7 @@ from ocaml.target_types import (
     OCamlPackage,
     OCamlPackageSourcesField,
     OCamlPackagesField,
+    OCamlPpxPackagesField,
     OCamlPlatformField,
 )
 
@@ -76,6 +77,50 @@ def _shell_command(command: str) -> str:
     return " ".join(shlex.quote(part) for part in _split_command(command))
 
 
+def _shell_quote_parts(parts: tuple[str, ...] | list[str]) -> str:
+    return " ".join(shlex.quote(part) for part in parts)
+
+
+def _parse_printppx_output(
+    output: str,
+    *,
+    owner: Address,
+    ppx_packages: tuple[str, ...],
+) -> tuple[str, ...]:
+    stripped_output = output.strip()
+    package_list = ", ".join(ppx_packages)
+
+    if not stripped_output:
+        raise ValueError(
+            f"{owner} sets `ppx_packages=[{package_list}]` but `ocamlfind printppx` returned empty output."
+        )
+
+    try:
+        args = tuple(shlex.split(stripped_output))
+    except ValueError as error:
+        raise ValueError(
+            f"{owner} sets `ppx_packages=[{package_list}]` but `ocamlfind printppx` output "
+            f"could not be parsed: {stripped_output}"
+        ) from error
+
+    if "-ppx" not in args:
+        raise ValueError(
+            f"{owner} sets `ppx_packages=[{package_list}]` but `ocamlfind printppx` did not "
+            f"produce any `-ppx` arguments: {stripped_output}"
+        )
+
+    for index, arg in enumerate(args):
+        if arg != "-ppx":
+            continue
+        if index + 1 >= len(args):
+            raise ValueError(
+                f"{owner} sets `ppx_packages=[{package_list}]` but `ocamlfind printppx` "
+                "returned `-ppx` without a preprocessor command."
+            )
+
+    return args
+
+
 def _js_of_ocaml_shell_parts(js_of_ocaml: str, bytecode_path: str, js_path: str) -> list[str]:
     return [
         _shell_command(js_of_ocaml),
@@ -109,6 +154,18 @@ def _tool_process_env(ocaml_tools: OCamlToolsSubsystem) -> dict[str, str]:
     opam_root = os.environ.get("OPAMROOT")
     if opam_root:
         env["OPAMROOT"] = opam_root
+
+    opam_switch_prefix = os.environ.get("OPAM_SWITCH_PREFIX")
+    if opam_switch_prefix:
+        env["OPAM_SWITCH_PREFIX"] = opam_switch_prefix
+
+    caml_ld_library_path = os.environ.get("CAML_LD_LIBRARY_PATH")
+    if caml_ld_library_path:
+        env["CAML_LD_LIBRARY_PATH"] = caml_ld_library_path
+
+    ocamlpath = os.environ.get("OCAMLPATH")
+    if ocamlpath:
+        env["OCAMLPATH"] = ocamlpath
 
     return env
 
@@ -286,6 +343,7 @@ async def build_ocaml_package(
 
     self_compiler_flags = tuple(target[OCamlCompilerFlagsField].value or ())
     self_packages = tuple(target[OCamlPackagesField].value or ())
+    self_ppx_packages = tuple(target[OCamlPpxPackagesField].value or ())
 
     compiler_dependency_names = _dedupe([*dep_external_names, *external_dep_names, *self_packages])
 
@@ -300,6 +358,26 @@ async def build_ocaml_package(
             *tuple(dep.digest for dep in dep_packages),
         )
     )
+
+    ppx_args: tuple[str, ...] = ()
+    if self_ppx_packages:
+        printppx_result = await Get(
+            ProcessResult,
+            Process(
+                argv=(
+                    *_split_command(ocaml_tools.ocamlfind),
+                    "printppx",
+                    *self_ppx_packages,
+                ),
+                env=_tool_process_env(ocaml_tools),
+                description=f"Resolve PPX preprocessors for {target.address}",
+            ),
+        )
+        ppx_args = _parse_printppx_output(
+            printppx_result.stdout.decode(),
+            owner=target.address,
+            ppx_packages=self_ppx_packages,
+        )
 
     ocamldep_argv = [*_split_command(ocaml_tools.ocamldep), "-sort"]
     for inc in dep_public_include_dirs:
@@ -334,6 +412,7 @@ async def build_ocaml_package(
     )
     include_args = " ".join(f"-I {shlex.quote(inc)}" for inc in compile_include_dirs)
     compiler_flags = " ".join(shlex.quote(flag) for flag in self_compiler_flags)
+    ppx_shell_args = _shell_quote_parts(ppx_args)
 
     compile_prefix = _join_shell(
         [
@@ -342,6 +421,7 @@ async def build_ocaml_package(
             package_arg,
             "-c",
             include_args,
+            ppx_shell_args,
             compiler_flags,
         ]
     )
@@ -352,6 +432,7 @@ async def build_ocaml_package(
             package_arg,
             "-c",
             include_args,
+            ppx_shell_args,
             compiler_flags,
         ]
     )

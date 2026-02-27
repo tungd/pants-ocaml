@@ -157,6 +157,13 @@ class TestPlatformCompatibility:
 
         assert OCamlCompilerFlagsField.alias == "compiler_flags"
 
+    def test_ppx_packages_field_is_package_only(self) -> None:
+        """Test that ppx_packages is available on package targets, not binaries."""
+        from ocaml.target_types import OCamlBinary, OCamlPackage, OCamlPpxPackagesField
+
+        assert OCamlPpxPackagesField in OCamlPackage.core_fields
+        assert OCamlPpxPackagesField not in OCamlBinary.core_fields
+
 
 def test_platform_field_is_backward_compatible():
     """Test that platform field is backward compatible (default is bytecode)."""

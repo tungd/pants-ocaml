@@ -48,6 +48,12 @@ class OCamlCompilerFlagsField(StringSequenceField):
     help = "Additional flags passed to ocamlc when compiling modules/packages."
 
 
+class OCamlPpxPackagesField(StringSequenceField):
+    alias = "ppx_packages"
+    default = ()
+    help = "ocamlfind package names used to resolve PPX preprocessors via `ocamlfind printppx`."
+
+
 class OCamlLinkFlagsField(StringSequenceField):
     alias = "link_flags"
     default = ()
@@ -75,6 +81,7 @@ class OCamlPackage(Target):
         OCamlDependencyNamesField,
         OCamlExposedModulesField,
         OCamlPackagesField,
+        OCamlPpxPackagesField,
         OCamlCompilerFlagsField,
     )
     help = "A package-level OCaml target that recursively scans sources and compiles via ocamldep order."
