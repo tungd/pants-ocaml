@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -11,6 +13,32 @@ from pants.testutil.rule_runner import RuleRunner
 
 from ocaml.providers import BuiltOCamlBinary, BuiltOCamlPackage
 from ocaml.rules import BuildOCamlBinaryRequest, BuildOCamlPackageRequest
+
+
+def _native_curl_prerequisite_error() -> str | None:
+    required_tools = ("ocamlfind", "ocamldep", "ocamlopt")
+    missing_tools = [tool for tool in required_tools if shutil.which(tool) is None]
+    if missing_tools:
+        return (
+            "Native curl integration test prerequisites are missing tools: "
+            f"{', '.join(missing_tools)}."
+        )
+
+    result = subprocess.run(
+        ["ocamlfind", "query", "curl"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        stderr = result.stderr.strip()
+        detail = f" Details: {stderr}" if stderr else ""
+        return (
+            "Native curl integration test requires OCaml findlib package `curl` "
+            "(install in your switch with `opam install conf-libcurl curl`)."
+            f"{detail}"
+        )
+    return None
 
 
 def _write_mock_ocaml_tools(tmp_path: Path) -> tuple[str, str]:
@@ -107,6 +135,35 @@ ocaml_binary(
     )
 
 
+def _write_curl_native_project(rule_runner: RuleRunner) -> None:
+    rule_runner.write_files(
+        {
+            "curl_demo/BUILD": """
+ocaml_package(
+    name="curl_demo",
+    packages=["curl"],
+)
+
+ocaml_binary(
+    name="curl_demo_native",
+    dependencies=["curl_demo"],
+    entry="main.ml",
+    platform="native",
+)
+""",
+            "curl_demo/demo.ml": """
+let create_and_cleanup () =
+  let multi = Curl.Multi.create () in
+  Curl.Multi.cleanup multi
+""",
+            "curl_demo/main.ml": """
+let () =
+  Demo.create_and_cleanup ()
+""",
+        }
+    )
+
+
 @pytest.mark.parametrize(
     ("target_name", "expected_platform", "expected_suffix"),
     (
@@ -193,3 +250,26 @@ ocaml_package(
         "top_only_pkg",
         "self_pkg",
     )
+
+
+def test_build_native_binary_with_curl_multi_cffi_binding(ocaml_rule_runner: RuleRunner) -> None:
+    prerequisite_error = _native_curl_prerequisite_error()
+    assert prerequisite_error is None, prerequisite_error
+
+    _write_curl_native_project(ocaml_rule_runner)
+
+    package_result = ocaml_rule_runner.request(
+        BuiltOCamlPackage,
+        [BuildOCamlPackageRequest(Address("curl_demo", target_name="curl_demo"))],
+    )
+
+    assert "curl" in package_result.transitive_external_dependency_names
+
+    binary_result = ocaml_rule_runner.request(
+        BuiltOCamlBinary,
+        [BuildOCamlBinaryRequest(Address("curl_demo", target_name="curl_demo_native"))],
+    )
+
+    assert binary_result.platform == "native"
+    assert binary_result.output_path.endswith("/curl_demo_native")
+    assert binary_result.digest.fingerprint
