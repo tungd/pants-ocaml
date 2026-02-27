@@ -5,7 +5,7 @@
 - Python 3.11
 - [Pants](https://www.pantsbuild.org/) (configured via `pants.toml`)
 - OCaml toolchain: `ocamlfind`, `ocamldep`, `ocamlopt`
-- Optional: `js_of_ocaml`
+- Optional: `js_of_ocaml` (required for `platform="js_of_ocaml"` and must support `--effects=cps`)
 
 ## Plugin Testing Workflow (Recommended)
 

@@ -8,6 +8,7 @@ from pants.build_graph.address import Address
 from ocaml.rules import (
     _binary_output_basename,
     _dedupe,
+    _js_of_ocaml_shell_parts,
     _join_shell,
     _module_name_from_stem,
     _shell_command,
@@ -117,6 +118,21 @@ class TestShellCommand:
         result = _shell_command("echo 'hello world'")
         assert "echo" in result
         assert "hello world" in result
+
+
+class TestJsOfOcamlShellParts:
+    """Tests for js_of_ocaml command construction."""
+
+    def test_includes_effects_cps_flag(self) -> None:
+        """Ensure js_of_ocaml invocations always enable effects via CPS transform."""
+        parts = _js_of_ocaml_shell_parts("js_of_ocaml", "bin/app.byte", "dist/app.js")
+        assert parts == ["js_of_ocaml", "--effects=cps", "bin/app.byte", "-o", "dist/app.js"]
+
+    def test_quotes_paths_with_spaces(self) -> None:
+        parts = _js_of_ocaml_shell_parts("js_of_ocaml", "bin/my app.byte", "dist/my app.js")
+        assert "--effects=cps" in parts
+        assert parts[2] == "'bin/my app.byte'"
+        assert parts[4] == "'dist/my app.js'"
 
 
 class TestTargetOutputDir:

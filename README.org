@@ -13,7 +13,7 @@ This is a custom [[https://www.pantsbuild.org][Pants]] backend for OCaml that ad
 - Multi-platform compilation support:
   - ~bytecode~: Uses ~ocamlc~, produces ~.byte~ files (default, most compatible)
   - ~native~: Uses ~ocamlopt~, produces native executables (best performance)
-- ~js_of_ocaml~: Uses ~ocamlc~ + ~js_of_ocaml~, produces ~.js~ files for web/Node.js
+- ~js_of_ocaml~: Uses ~ocamlc~ + ~js_of_ocaml --effects=cps~, produces ~.js~ files for web/Node.js
 - Fine-grained caching and parallel execution via the Pants engine
 
 * Installation
@@ -106,6 +106,7 @@ bash = "/bin/bash"
 #+end_src
 
 The backend automatically sets up ~PATH~, ~HOME~, and ~OPAMROOT~ for tool processes.
+For ~platform="js_of_ocaml"~, the backend invokes ~js_of_ocaml~ with ~--effects=cps~.
 
 * Examples
 
@@ -211,7 +212,7 @@ The backend uses Pants' engine for fine-grained caching and parallel execution:
 3. **Platform Dispatch**: Binary linking dispatches to the appropriate compiler based on the ~platform~ field:
    - ~bytecode~: Links with ~ocamlc~ to produce ~.byte~ files
    - ~native~: Links with ~ocamlopt~ to produce native executables
-   - ~js_of_ocaml~: Links with ~ocamlc~, then converts with ~js_of_ocaml~ to produce ~.js~ files
+   - ~js_of_ocaml~: Links with ~ocamlc~, then converts with ~js_of_ocaml --effects=cps~ to produce ~.js~ files
 4. **Incremental Builds**: Only recompiles changed modules and their dependents
 5. **Parallel Execution**: Independent packages compile in parallel
 
@@ -221,7 +222,7 @@ Compiled artifacts are stored under ~__pants_ocaml__/~ in the working directory.
 
 - Pants 2.x
 - OCaml toolchain: ~ocamlfind~, ~ocamldep~, ~ocamlc~, ~ocamlopt~
-- (Optional) ~js_of_ocaml~ for JavaScript platform
+- (Optional) ~js_of_ocaml~ for JavaScript platform (must support ~--effects=cps~)
 - (Optional) OPAM for package management
 
 * Development

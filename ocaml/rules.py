@@ -76,6 +76,16 @@ def _shell_command(command: str) -> str:
     return " ".join(shlex.quote(part) for part in _split_command(command))
 
 
+def _js_of_ocaml_shell_parts(js_of_ocaml: str, bytecode_path: str, js_path: str) -> list[str]:
+    return [
+        _shell_command(js_of_ocaml),
+        "--effects=cps",
+        shlex.quote(bytecode_path),
+        "-o",
+        shlex.quote(js_path),
+    ]
+
+
 def _tool_process_env(ocaml_tools: OCamlToolsSubsystem) -> dict[str, str]:
     tool_dirs: list[str] = []
     for command in (ocaml_tools.ocamlfind, ocaml_tools.ocamldep, ocaml_tools.ocamlopt, ocaml_tools.js_of_ocaml):
@@ -631,12 +641,7 @@ async def build_ocaml_binary(
             [
                 "set -euo pipefail",
                 _join_shell(
-                    [
-                        _shell_command(ocaml_tools.js_of_ocaml),
-                        shlex.quote(bytecode_path),
-                        "-o",
-                        shlex.quote(js_path),
-                    ]
+                    _js_of_ocaml_shell_parts(ocaml_tools.js_of_ocaml, bytecode_path, js_path)
                 ),
             ]
         )
@@ -817,12 +822,7 @@ async def _link_js_of_ocaml_binary(
         [
             "set -euo pipefail",
             _join_shell(
-                [
-                    _shell_command(ocaml_tools.js_of_ocaml),
-                    shlex.quote(bytecode_path),
-                    "-o",
-                    shlex.quote(js_path),
-                ]
+                _js_of_ocaml_shell_parts(ocaml_tools.js_of_ocaml, bytecode_path, js_path)
             ),
         ]
     )
