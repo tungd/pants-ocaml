@@ -17,18 +17,21 @@ jobs:
       - name: Install OCaml toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y opam ocaml
+          sudo apt-get install -y opam ocaml ocaml-findlib
 
       - name: Install js_of_ocaml
         run: |
           opam init -y
           eval "$(opam env)"
           opam install -y js_of_ocaml
+          echo "PATH=$PATH" >> "$GITHUB_ENV"
+          echo "OPAMROOT=$(opam var root)" >> "$GITHUB_ENV"
+          echo "OPAM_SWITCH_PREFIX=$(opam var prefix)" >> "$GITHUB_ENV"
 
-      - name: Set up Python 3.14
+      - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: "3.14"
+          python-version: "3.11"
 
       - name: Set up Pants
         uses: pantsbuild/actions/init-pants@v10
@@ -56,10 +59,23 @@ jobs:
         run: |
           set -euo pipefail
 
+          command -v ocamlfind
+          command -v ocamldep
+          command -v ocamlopt
+          command -v js_of_ocaml
+
           # Use scie-pants only; retry bootstrap/tests with exponential-ish backoff.
           for i in 1 2 3 4 5; do
-            if pants --version && pants test tests::; then
-              exit 0
+            if pants --version && pants --filter-target-type=python_test list tests:: > /tmp/python_tests.txt; then
+              if [ ! -s /tmp/python_tests.txt ]; then
+                echo "::error::No python_test targets discovered under tests::"
+                exit 1
+              fi
+              cat /tmp/python_tests.txt
+
+              if pants test tests::; then
+                exit 0
+              fi
             fi
             echo "::warning::Pants bootstrap/test attempt ${i} failed; clearing nce cache and retrying."
             rm -rf "$HOME/.cache/nce" || true

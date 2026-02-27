@@ -1,0 +1,9 @@
+python_tests(
+    name="unit",
+    sources=["test_*.py"],
+    interpreter_constraints=["==3.11.*"],
+    dependencies=[
+        "//tests:test_utils",
+        "//:pants#pantsbuild.pants.testutil",
+    ],
+)

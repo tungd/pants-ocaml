@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Python 3.12
+- Python 3.11
 - [Pants](https://www.pantsbuild.org/) (configured via `pants.toml`)
 - OCaml toolchain: `ocamlfind`, `ocamldep`, `ocamlopt`
 - Optional: `js_of_ocaml`

@@ -8,4 +8,4 @@ backend_packages = [
 pythonpath = ["%(buildroot)s"]
 
 [python]
-interpreter_constraints = ["==3.14.*"]
+interpreter_constraints = ["==3.11.*"]

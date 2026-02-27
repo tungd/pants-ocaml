@@ -3,7 +3,7 @@ name = "pants-ocaml"
 version = "0.1.0"
 description = "Custom Pants backend for OCaml language support"
 readme = "README.org"
-requires-python = ">=3.8"
+requires-python = ">=3.11"
 license = {text = "Apache-2.0"}
 dependencies = []
 

@@ -5,9 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from pants.engine.rules import QueryRule
 from pants.testutil.option_util import create_subsystem
 from pants.testutil.rule_runner import RuleRunner
 
+from ocaml import rules as ocaml_rules
+from ocaml.providers import BuiltOCamlBinary, BuiltOCamlPackage
+from ocaml.rules import BuildOCamlBinaryRequest, BuildOCamlPackageRequest
 from ocaml.subsystem import OCamlToolsSubsystem
 from ocaml.target_types import (
     OCamlBinary,
@@ -88,7 +92,11 @@ def create_ocaml_rule_runner(*extra_target_types: type, extra_options: dict | No
             OCamlBinary,
             *extra_target_types,
         ],
-        rules=[],
+        rules=[
+            *ocaml_rules.rules(),
+            QueryRule(BuiltOCamlPackage, (BuildOCamlPackageRequest,)),
+            QueryRule(BuiltOCamlBinary, (BuildOCamlBinaryRequest,)),
+        ],
     )
 
 
